@@ -348,6 +348,11 @@ class HAConnection:
             disc_topic = f"{self.prefix}/{domain}/waterh/{object_id}/config"
             self.client.publish(disc_topic, json.dumps(config), retain=True)
 
+        # Publish baseline state values so HA entities immediately populate
+        self.publish_state("sensor/daily_goal", GOAL_ML)
+        self.publish_state("select/led_mode", "default")
+        self.publish_state("sensor/status", "scanning")
+
     def publish_state(self, entity_subpath: str, value):
         if self.connected and self.client:
             topic = f"waterh/{entity_subpath}/state"
@@ -920,6 +925,17 @@ async def ble_loop():
 
     db = init_db()
     log.info(f"[DB] Initialized at {DB_PATH}")
+
+    total_today = db.execute(
+        "SELECT COALESCE(SUM(intake_ml), 0) FROM sips WHERE DATE(timestamp) = DATE('now')"
+    ).fetchone()[0]
+
+    if ha_conn:
+        ha_conn.publish_state("sensor/today_intake", total_today)
+        ha_conn.publish_state("sensor/daily_goal", GOAL_ML)
+    if ha_api:
+        ha_api.update_sensor("today_intake", total_today, unit="mL", friendly_name="WaterH Today Intake", icon="mdi:cup-water", device_class="water", state_class="total_increasing")
+        ha_api.update_sensor("daily_goal", GOAL_ML, unit="mL", friendly_name="WaterH Daily Goal", icon="mdi:target-variant")
 
     # Start command HTTP server
     await start_cmd_server()
