@@ -165,7 +165,11 @@ class HAConnection:
 
         self.loop = loop
         self.cmd_queue = cmd_queue
-        self.client = mqtt.Client(client_id="waterh_collector")
+        if hasattr(mqtt, "CallbackAPIVersion"):
+            self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, client_id="waterh_collector")
+        else:
+            self.client = mqtt.Client(client_id="waterh_collector")
+
         if self.user:
             self.client.username_pw_set(self.user, self.password)
 
@@ -179,14 +183,22 @@ class HAConnection:
         except Exception as e:
             log.error(f"[MQTT] Failed to start MQTT client: {e}")
 
-    def _on_connect(self, client, userdata, flags, rc):
+    def _on_connect(self, client, userdata, flags, rc, properties=None):
         if rc == 0:
             log.info("[MQTT] Connected to MQTT broker successfully")
             self.connected = True
             self.publish_discovery()
             self.client.subscribe("waterh/cmd/#")
         else:
-            log.error(f"[MQTT] Connection to broker failed with code {rc}")
+            reasons = {
+                1: "Incorrect protocol version",
+                2: "Invalid client identifier",
+                3: "Server unavailable",
+                4: "Bad username or password",
+                5: "Not authorized (Check MQTT username & password in Add-on Configuration)",
+            }
+            reason_str = reasons.get(rc, f"Code {rc}")
+            log.error(f"[MQTT] Connection to broker failed: {reason_str}")
 
     def _on_message(self, client, userdata, msg):
         topic = msg.topic
