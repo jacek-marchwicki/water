@@ -13,6 +13,8 @@ bluetooth: true
 privileged:
   - NET_ADMIN
   - NET_RAW
+services:
+  - mqtt:want
 options:
   bottle_address: "A4:C1:38:32:D7:DE"
   poll_interval: 60

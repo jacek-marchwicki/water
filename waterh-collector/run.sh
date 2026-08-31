@@ -26,5 +26,28 @@ else
     echo "[WaterH Add-on] /data/options.json not found, using environment defaults"
 fi
 
+# Auto-detect MQTT credentials provided by Home Assistant Supervisor services
+SERVICES_PATH=/data/services.json
+if [ -f "$SERVICES_PATH" ] && jq -e '.mqtt' "$SERVICES_PATH" >/dev/null 2>&1; then
+    echo "[WaterH Add-on] Auto-detecting MQTT credentials from Home Assistant Supervisor..."
+    SVC_HOST=$(jq -r '.mqtt.host // "core-mosquitto"' "$SERVICES_PATH")
+    SVC_PORT=$(jq -r '.mqtt.port // 1883' "$SERVICES_PATH")
+    SVC_USER=$(jq -r '.mqtt.username // ""' "$SERVICES_PATH")
+    SVC_PASS=$(jq -r '.mqtt.password // ""' "$SERVICES_PATH")
+
+    if [ -z "$MQTT_USER" ]; then
+        export MQTT_USER="$SVC_USER"
+    fi
+    if [ -z "$MQTT_PASSWORD" ]; then
+        export MQTT_PASSWORD="$SVC_PASS"
+    fi
+    if [ "$MQTT_HOST" = "core-mosquitto" ] || [ -z "$MQTT_HOST" ]; then
+        export MQTT_HOST="$SVC_HOST"
+    fi
+    if [ -z "$MQTT_PORT" ]; then
+        export MQTT_PORT="$SVC_PORT"
+    fi
+fi
+
 echo "[WaterH Add-on] Starting WaterH Collector for bottle: ${WATERH_ADDR}"
 exec python3 /app/collector/collector.py
