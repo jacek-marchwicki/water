@@ -159,6 +159,20 @@ class HAConnection:
         if not HAS_MQTT:
             log.info("[MQTT] paho-mqtt package not installed, MQTT integration disabled")
             return
+
+        # Auto-fetch MQTT credentials from Supervisor Services API if missing
+        if not self.user or not self.password:
+            token = get_supervisor_token()
+            if token:
+                svc_host, svc_port, svc_user, svc_pass = fetch_mqtt_service_credentials(token)
+                if svc_user and svc_pass:
+                    self.user = self.user or svc_user
+                    self.password = self.password or svc_pass
+                    if not self.host or self.host == "core-mosquitto":
+                        self.host = svc_host
+                    if svc_port:
+                        self.port = svc_port
+
         if not self.host:
             log.info("[MQTT] MQTT_HOST not configured, MQTT integration disabled")
             return
@@ -343,13 +357,66 @@ class HAConnection:
 ha_conn: HAConnection | None = None
 
 
-# --- Home Assistant Direct REST API Integration ---
+# --- Home Assistant Direct REST API & Services Integration ---
 
-SUPERVISOR_TOKEN = (
-    os.environ.get("SUPERVISOR_TOKEN", "")
-    or os.environ.get("HASSIO_TOKEN", "")
-    or os.environ.get("HOMEASSISTANT_TOKEN", "")
-)
+def get_supervisor_token() -> str:
+    token = (
+        os.environ.get("SUPERVISOR_TOKEN")
+        or os.environ.get("HASSIO_TOKEN")
+        or os.environ.get("HOMEASSISTANT_TOKEN")
+        or ""
+    )
+    if token:
+        return token
+
+    # Check s6-overlay container environment files in HA base image
+    for path_str in [
+        "/var/run/s6/container_environment/SUPERVISOR_TOKEN",
+        "/run/s6/container_environment/SUPERVISOR_TOKEN",
+        "/var/run/s6/container_environment/HASSIO_TOKEN",
+        "/run/s6/container_environment/HASSIO_TOKEN",
+    ]:
+        try:
+            p = Path(path_str)
+            if p.is_file():
+                val = p.read_text().strip()
+                if val:
+                    log.info(f"[INIT] Loaded Supervisor token from {path_str}")
+                    return val
+        except Exception:
+            pass
+
+    return ""
+
+
+def fetch_mqtt_service_credentials(token: str) -> tuple[str, int, str, str]:
+    if not token:
+        return ("", 0, "", "")
+
+    url = "http://supervisor/services/mqtt"
+    req = urllib.request.Request(
+        url,
+        headers={"Authorization": f"Bearer {token}"},
+        method="GET"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if data.get("result") == "ok" and "data" in data:
+                svc = data["data"]
+                host = svc.get("host", "core-mosquitto")
+                port = int(svc.get("port", 1883))
+                user = svc.get("username", "")
+                password = svc.get("password", "")
+                log.info(f"[MQTT] Auto-retrieved Supervisor MQTT credentials (user: {user})")
+                return (host, port, user, password)
+    except Exception as e:
+        log.warning(f"[MQTT] Could not fetch Supervisor MQTT service credentials: {e}")
+
+    return ("", 0, "", "")
+
+
+SUPERVISOR_TOKEN = get_supervisor_token()
 
 class HARestAPI:
     def __init__(self, token: str):
