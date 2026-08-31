@@ -10,6 +10,8 @@ arch:
 init: false
 host_dbus: true
 bluetooth: true
+hassio_api: true
+homeassistant_api: true
 privileged:
   - NET_ADMIN
   - NET_RAW

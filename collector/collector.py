@@ -343,6 +343,64 @@ class HAConnection:
 ha_conn: HAConnection | None = None
 
 
+# --- Home Assistant Direct REST API Integration ---
+
+SUPERVISOR_TOKEN = os.environ.get("SUPERVISOR_TOKEN", "")
+
+class HARestAPI:
+    def __init__(self, token: str):
+        self.token = token
+        self.base_url = "http://supervisor/core/api/states"
+
+    def update_sensor(
+        self,
+        entity_name: str,
+        state_value,
+        unit: str = "",
+        friendly_name: str = "",
+        icon: str = "",
+        device_class: str = "",
+        state_class: str = ""
+    ):
+        if not self.token:
+            return
+
+        entity_id = f"sensor.waterh_{entity_name}"
+        attributes = {}
+        if friendly_name:
+            attributes["friendly_name"] = friendly_name
+        if unit:
+            attributes["unit_of_measurement"] = unit
+        if icon:
+            attributes["icon"] = icon
+        if device_class:
+            attributes["device_class"] = device_class
+        if state_class:
+            attributes["state_class"] = state_class
+
+        payload = json.dumps({
+            "state": str(state_value),
+            "attributes": attributes
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            f"{self.base_url}/{entity_id}",
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {self.token}",
+                "Content-Type": "application/json"
+            },
+            method="POST"
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                log.info(f"[HA-API] Direct API updated {entity_id} = {state_value}")
+        except Exception as e:
+            log.warning(f"[HA-API] Failed to update {entity_id}: {e}")
+
+ha_api = HARestAPI(SUPERVISOR_TOKEN) if SUPERVISOR_TOKEN else None
+
+
 # --- Command queue (shared between HTTP server and BLE loop) ---
 # Initialized in ble_loop() once the event loop is running.
 
@@ -600,9 +658,11 @@ def push_to_remote(db):
 # --- Heartbeat ---
 
 def post_heartbeat(state: str, detail: str = ""):
+    status_val = f"{state}: {detail}" if detail else state
     if ha_conn:
-        status_val = f"{state}: {detail}" if detail else state
         ha_conn.publish_state("sensor/status", status_val)
+    if ha_api:
+        ha_api.update_sensor("status", status_val, friendly_name="WaterH Collector Status", icon="mdi:bluetooth-connect")
     if not API_TOKEN:
         return
     payload = json.dumps({
@@ -689,6 +749,8 @@ async def sync_cycle(client, queue: asyncio.Queue, db) -> bool:
             log.info(f"[BLE] Battery: {rp[6]}%, charging: {rp[31]}")
             if ha_conn:
                 ha_conn.publish_state("sensor/battery", rp[6])
+            if ha_api:
+                ha_api.update_sensor("battery", rp[6], unit="%", friendly_name="WaterH Battery", device_class="battery")
     else:
         log.warning("[BLE] No bottle data response")
 
@@ -708,6 +770,9 @@ async def sync_cycle(client, queue: asyncio.Queue, db) -> bool:
     if ha_conn:
         ha_conn.publish_state("sensor/today_intake", total_today)
         ha_conn.publish_state("sensor/daily_goal", GOAL_ML)
+    if ha_api:
+        ha_api.update_sensor("today_intake", total_today, unit="mL", friendly_name="WaterH Today Intake", icon="mdi:cup-water", device_class="water", state_class="total_increasing")
+        ha_api.update_sensor("daily_goal", GOAL_ML, unit="mL", friendly_name="WaterH Daily Goal", icon="mdi:target-variant")
 
     # Step 4: Request water logs
     pkts = await ble_write_and_wait(client, cmd_request_water_logs(), "request-logs", queue, wait=4.0)
@@ -743,6 +808,12 @@ async def sync_cycle(client, queue: asyncio.Queue, db) -> bool:
             latest = sips[-1]
             ha_conn.publish_state("sensor/temperature", latest["temp_c"])
             ha_conn.publish_state("sensor/tds", latest["tds"])
+    if ha_api:
+        ha_api.update_sensor("today_intake", total_today, unit="mL", friendly_name="WaterH Today Intake", icon="mdi:cup-water", device_class="water", state_class="total_increasing")
+        if sips:
+            latest = sips[-1]
+            ha_api.update_sensor("temperature", latest["temp_c"], unit="°C", friendly_name="WaterH Water Temperature", device_class="temperature")
+            ha_api.update_sensor("tds", latest["tds"], unit="ppm", friendly_name="WaterH Water Quality (TDS)", icon="mdi:water-check")
 
     # Step 7: Ack + clear from bottle
     if sips:
