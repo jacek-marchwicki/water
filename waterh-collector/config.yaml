@@ -1,6 +1,6 @@
 name: "WaterH Smart Bottle Collector"
 slug: "waterh_collector"
-version: "1.0.2"
+version: "1.0.3"
 description: "BLE Collector for WaterH Smart Water Bottle with Home Assistant MQTT Discovery"
 url: "https://github.com/sylvexn/water"
 arch:
@@ -10,6 +10,7 @@ arch:
 init: false
 host_dbus: true
 bluetooth: true
+hassio_role: default
 hassio_api: true
 homeassistant_api: true
 privileged:

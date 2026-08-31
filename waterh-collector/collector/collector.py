@@ -345,7 +345,11 @@ ha_conn: HAConnection | None = None
 
 # --- Home Assistant Direct REST API Integration ---
 
-SUPERVISOR_TOKEN = os.environ.get("SUPERVISOR_TOKEN", "") or os.environ.get("HASSIO_TOKEN", "")
+SUPERVISOR_TOKEN = (
+    os.environ.get("SUPERVISOR_TOKEN", "")
+    or os.environ.get("HASSIO_TOKEN", "")
+    or os.environ.get("HOMEASSISTANT_TOKEN", "")
+)
 
 class HARestAPI:
     def __init__(self, token: str):
@@ -973,7 +977,9 @@ def main():
     log.info(f"[INIT] Poll interval: {POLL_INTERVAL}s")
     log.info(f"[INIT] API: {API_URL}")
     log.info(f"[INIT] Command server: :{CMD_PORT}")
-    log.info(f"[INIT] HA Direct API: {'enabled' if SUPERVISOR_TOKEN else 'disabled (no SUPERVISOR_TOKEN)'}")
+    token_keys = [k for k in os.environ.keys() if any(x in k.upper() for x in ["TOKEN", "SUPERVISOR", "HASSIO"])]
+    log.info(f"[INIT] Detected token env vars: {token_keys}")
+    log.info(f"[INIT] HA Direct API: {'enabled' if SUPERVISOR_TOKEN else 'disabled (no token detected)'}")
     asyncio.run(ble_loop())
 
 
