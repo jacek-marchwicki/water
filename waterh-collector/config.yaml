@@ -1,0 +1,39 @@
+name: "WaterH Smart Bottle Collector"
+slug: "waterh_collector"
+version: "1.0.0"
+description: "BLE Collector for WaterH Smart Water Bottle with Home Assistant MQTT Discovery"
+url: "https://github.com/sylvexn/water"
+arch:
+  - aarch64
+  - armv7
+  - amd64
+init: false
+host_dbus: true
+bluetooth: true
+privileged:
+  - NET_ADMIN
+  - NET_RAW
+options:
+  bottle_address: "A4:C1:38:32:D7:DE"
+  poll_interval: 60
+  goal_ml: 2500
+  mqtt_host: "core-mosquitto"
+  mqtt_port: 1883
+  mqtt_user: ""
+  mqtt_password: ""
+  mqtt_topic_prefix: "homeassistant"
+  enable_api_push: false
+  api_url: "https://water.syl.rest/api/ingest"
+  api_token: ""
+schema:
+  bottle_address: str
+  poll_interval: int
+  goal_ml: int
+  mqtt_host: str
+  mqtt_port: int
+  mqtt_user: str?
+  mqtt_password: str?
+  mqtt_topic_prefix: str
+  enable_api_push: bool
+  api_url: str
+  api_token: str?

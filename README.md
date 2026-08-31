@@ -74,14 +74,24 @@ research/           Reverse engineering scripts
 
 ## Running
 
-### Collector
+### Home Assistant OS (Raspberry Pi / Add-on)
+
+The collector includes native **Home Assistant MQTT Auto-Discovery** support and can be installed directly as a Home Assistant OS Add-on!
+
+1. Copy the `waterh-collector` directory into your Home Assistant `/addons/` folder (or add this GitHub repository under **Add-on Store -> Repositories**).
+2. Go to **Settings -> Add-ons -> Add-on Store -> Check for new add-ons**.
+3. Select **WaterH Smart Bottle Collector** under Local Add-ons.
+4. Configure your bottle's Bluetooth MAC address (`bottle_address`) and click **Start**.
+5. Your bottle will automatically appear as a Device in Home Assistant with sensors (Today Intake, Battery, Temp, TDS, Goal) and controls (Flash LED, LED mode, Goal setting).
+
+### Standalone Collector (Linux Host / Raspberry Pi OS)
 
 Requires a BLE-capable Linux host with the bottle in range.
 
 ```bash
-sudo pacman -S bluez bluez-utils python-bleak
-sudo systemctl start bluetooth
-pip install -r collector/requirements.txt
+pip install bleak paho-mqtt
+export WATERH_ADDR="A4:C1:38:32:D7:DE"
+export MQTT_HOST="192.168.1.50" # optional: your Home Assistant IP
 python3 collector/collector.py
 ```
 
@@ -95,3 +105,4 @@ docker run -p 8000:8000 -v waterh-data:/data waterh-server
 ## License
 
 MIT
+
