@@ -62,7 +62,7 @@ MQTT_PREFIX = os.environ.get("MQTT_TOPIC_PREFIX", "homeassistant")
 MAX_SCAN_FAILURES = 3
 MAX_EMPTY_POLLS = 5
 BACKOFF_BASE = 5
-BACKOFF_CAP = 300
+BACKOFF_CAP = 30
 
 
 
@@ -793,6 +793,30 @@ def parse_pt_packets(packets: list[bytes]) -> tuple[list[dict], int]:
 
 # --- BLE helpers ---
 
+async def find_waterh_device(target_addr: str, timeout: float = 12.0):
+    """Find bottle by case-insensitive MAC address or device name."""
+    try:
+        device = await BleakScanner.find_device_by_address(target_addr, timeout=timeout)
+        if device:
+            return device
+    except Exception:
+        pass
+
+    try:
+        devices = await BleakScanner.discover(timeout=timeout)
+        target_mac = target_addr.lower()
+        for d in devices:
+            if d.address.lower() == target_mac:
+                return d
+            if d.name and "waterh" in d.name.lower():
+                log.info(f"[BLE] Discovered bottle by name: {d.name} ({d.address})")
+                return d
+    except Exception as e:
+        log.error(f"[BLE] Discovery scan error: {e}")
+
+    return None
+
+
 def drain_queue(q: asyncio.Queue) -> list[bytes]:
     items = []
     while not q.empty():
@@ -954,21 +978,11 @@ async def ble_loop():
         log.info(f"[BLE] Scanning for {BOTTLE_ADDR}...")
         post_heartbeat("scanning")
 
-        try:
-            device = await BleakScanner.find_device_by_address(BOTTLE_ADDR, timeout=15)
-        except Exception as e:
-            log.error(f"[BLE] Scan error: {e}")
-            device = None
+        device = await find_waterh_device(BOTTLE_ADDR, timeout=12.0)
 
         if not device:
             scan_failures += 1
-            if scan_failures >= MAX_SCAN_FAILURES:
-                # Full reset: remove device + power cycle adapter
-                bluez_full_reset(BOTTLE_ADDR)
-                scan_failures = 0
-            else:
-                # Light cleanup: just remove stale device reference
-                bluez_remove_device(BOTTLE_ADDR)
+            bluez_remove_device(BOTTLE_ADDR)
             log.warning(f"[BLE] Not found (attempt {scan_failures}), retry in {backoff}s")
             post_heartbeat("scanning", f"not found, retry {backoff}s")
             await asyncio.sleep(backoff)
