@@ -345,12 +345,12 @@ ha_conn: HAConnection | None = None
 
 # --- Home Assistant Direct REST API Integration ---
 
-SUPERVISOR_TOKEN = os.environ.get("SUPERVISOR_TOKEN", "")
+SUPERVISOR_TOKEN = os.environ.get("SUPERVISOR_TOKEN", "") or os.environ.get("HASSIO_TOKEN", "")
 
 class HARestAPI:
     def __init__(self, token: str):
         self.token = token
-        self.base_url = "http://supervisor/core/api/states"
+        self.base_urls = ["http://supervisor/core/api/states", "http://172.30.32.1/api/states"]
 
     def update_sensor(
         self,
@@ -383,20 +383,22 @@ class HARestAPI:
             "attributes": attributes
         }).encode("utf-8")
 
-        req = urllib.request.Request(
-            f"{self.base_url}/{entity_id}",
-            data=payload,
-            headers={
-                "Authorization": f"Bearer {self.token}",
-                "Content-Type": "application/json"
-            },
-            method="POST"
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                log.info(f"[HA-API] Direct API updated {entity_id} = {state_value}")
-        except Exception as e:
-            log.warning(f"[HA-API] Failed to update {entity_id}: {e}")
+        for base_url in self.base_urls:
+            req = urllib.request.Request(
+                f"{base_url}/{entity_id}",
+                data=payload,
+                headers={
+                    "Authorization": f"Bearer {self.token}",
+                    "Content-Type": "application/json"
+                },
+                method="POST"
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    log.info(f"[HA-API] Direct API updated {entity_id} = {state_value}")
+                    return
+            except Exception as e:
+                log.warning(f"[HA-API] Failed to update {entity_id} via {base_url}: {e}")
 
 ha_api = HARestAPI(SUPERVISOR_TOKEN) if SUPERVISOR_TOKEN else None
 
@@ -971,6 +973,7 @@ def main():
     log.info(f"[INIT] Poll interval: {POLL_INTERVAL}s")
     log.info(f"[INIT] API: {API_URL}")
     log.info(f"[INIT] Command server: :{CMD_PORT}")
+    log.info(f"[INIT] HA Direct API: {'enabled' if SUPERVISOR_TOKEN else 'disabled (no SUPERVISOR_TOKEN)'}")
     asyncio.run(ble_loop())
 
 
