@@ -508,6 +508,9 @@ def send_html(writer: asyncio.StreamWriter, status: int, html: str):
         f"HTTP/1.1 {status} OK\r\n"
         f"Content-Type: text/html; charset=utf-8\r\n"
         f"Content-Length: {len(body)}\r\n"
+        f"Cache-Control: no-cache, no-store, must-revalidate\r\n"
+        f"Pragma: no-cache\r\n"
+        f"Expires: 0\r\n"
         f"Access-Control-Allow-Origin: *\r\n"
         f"\r\n".encode("utf-8") + body
     )
