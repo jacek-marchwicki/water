@@ -900,14 +900,35 @@ def push_to_remote(db):
         log.warning(f"[PUSH] Failed: {e}")
 
 
-# --- Heartbeat ---
+# --- Heartbeat & HA Sensor Publishing ---
+
+def publish_ha_sensor(
+    entity_name: str,
+    state_value,
+    unit: str = "",
+    friendly_name: str = "",
+    icon: str = "",
+    device_class: str = "",
+    state_class: str = ""
+):
+    """Publish sensor state via MQTT if connected; fallback to Direct REST API."""
+    if ha_conn and ha_conn.connected:
+        ha_conn.publish_state(f"sensor/{entity_name}", state_value)
+    elif ha_api:
+        ha_api.update_sensor(
+            entity_name,
+            state_value,
+            unit=unit,
+            friendly_name=friendly_name,
+            icon=icon,
+            device_class=device_class,
+            state_class=state_class,
+        )
+
 
 def post_heartbeat(state: str, detail: str = ""):
     status_val = f"{state}: {detail}" if detail else state
-    if ha_conn:
-        ha_conn.publish_state("sensor/status", status_val)
-    if ha_api:
-        ha_api.update_sensor("status", status_val, friendly_name="WaterH Collector Status", icon="mdi:bluetooth-connect")
+    publish_ha_sensor("status", status_val, friendly_name="WaterH Collector Status", icon="mdi:bluetooth-connect")
     if not API_TOKEN:
         return
     payload = json.dumps({
@@ -1016,10 +1037,7 @@ async def sync_cycle(client, queue: asyncio.Queue, db) -> bool:
         rp = rp_pkts[0]
         if len(rp) > 31:
             log.info(f"[BLE] Battery: {rp[6]}%, charging: {rp[31]}")
-            if ha_conn:
-                ha_conn.publish_state("sensor/battery", rp[6])
-            if ha_api:
-                ha_api.update_sensor("battery", rp[6], unit="%", friendly_name="WaterH Battery", device_class="battery")
+            publish_ha_sensor("battery", rp[6], unit="%", friendly_name="WaterH Battery", device_class="battery")
     else:
         log.warning("[BLE] No bottle data response")
 
@@ -1036,12 +1054,8 @@ async def sync_cycle(client, queue: asyncio.Queue, db) -> bool:
         "SELECT COALESCE(SUM(intake_ml), 0) FROM sips WHERE DATE(timestamp) = DATE('now')"
     ).fetchone()[0]
     await ble_write_and_wait(client, cmd_sync_today_amount(total_today), "sync-display", queue, wait=1.0)
-    if ha_conn:
-        ha_conn.publish_state("sensor/today_intake", total_today)
-        ha_conn.publish_state("sensor/daily_goal", GOAL_ML)
-    if ha_api:
-        ha_api.update_sensor("today_intake", total_today, unit="mL", friendly_name="WaterH Today Intake", icon="mdi:cup-water", device_class="water", state_class="total_increasing")
-        ha_api.update_sensor("daily_goal", GOAL_ML, unit="mL", friendly_name="WaterH Daily Goal", icon="mdi:target-variant")
+    publish_ha_sensor("today_intake", total_today, unit="mL", friendly_name="WaterH Today Intake", icon="mdi:cup-water", device_class="water", state_class="total_increasing")
+    publish_ha_sensor("daily_goal", GOAL_ML, unit="mL", friendly_name="WaterH Daily Goal", icon="mdi:target-variant")
 
     # Step 4: Request water logs
     pkts = await ble_write_and_wait(client, cmd_request_water_logs(), "request-logs", queue, wait=4.0)
@@ -1071,18 +1085,11 @@ async def sync_cycle(client, queue: asyncio.Queue, db) -> bool:
         "SELECT COALESCE(SUM(intake_ml), 0) FROM sips WHERE DATE(timestamp) = DATE('now')"
     ).fetchone()[0]
     log.info(f"[BLE] Stored {len(sips)} sips ({new_count} new), {total_today}ml today")
-    if ha_conn:
-        ha_conn.publish_state("sensor/today_intake", total_today)
-        if sips:
-            latest = sips[-1]
-            ha_conn.publish_state("sensor/temperature", latest["temp_c"])
-            ha_conn.publish_state("sensor/tds", latest["tds"])
-    if ha_api:
-        ha_api.update_sensor("today_intake", total_today, unit="mL", friendly_name="WaterH Today Intake", icon="mdi:cup-water", device_class="water", state_class="total_increasing")
-        if sips:
-            latest = sips[-1]
-            ha_api.update_sensor("temperature", latest["temp_c"], unit="°C", friendly_name="WaterH Water Temperature", device_class="temperature")
-            ha_api.update_sensor("tds", latest["tds"], unit="ppm", friendly_name="WaterH Water Quality (TDS)", icon="mdi:water-check")
+    publish_ha_sensor("today_intake", total_today, unit="mL", friendly_name="WaterH Today Intake", icon="mdi:cup-water", device_class="water", state_class="total_increasing")
+    if sips:
+        latest = sips[-1]
+        publish_ha_sensor("temperature", latest["temp_c"], unit="°C", friendly_name="WaterH Water Temperature", device_class="temperature")
+        publish_ha_sensor("tds", latest["tds"], unit="ppm", friendly_name="WaterH Water Quality (TDS)", icon="mdi:water-check")
 
     # Step 7: Ack + clear from bottle
     if sips:
@@ -1121,12 +1128,8 @@ async def ble_loop():
         "SELECT COALESCE(SUM(intake_ml), 0) FROM sips WHERE DATE(timestamp) = DATE('now')"
     ).fetchone()[0]
 
-    if ha_conn:
-        ha_conn.publish_state("sensor/today_intake", total_today)
-        ha_conn.publish_state("sensor/daily_goal", GOAL_ML)
-    if ha_api:
-        ha_api.update_sensor("today_intake", total_today, unit="mL", friendly_name="WaterH Today Intake", icon="mdi:cup-water", device_class="water", state_class="total_increasing")
-        ha_api.update_sensor("daily_goal", GOAL_ML, unit="mL", friendly_name="WaterH Daily Goal", icon="mdi:target-variant")
+    publish_ha_sensor("today_intake", total_today, unit="mL", friendly_name="WaterH Today Intake", icon="mdi:cup-water", device_class="water", state_class="total_increasing")
+    publish_ha_sensor("daily_goal", GOAL_ML, unit="mL", friendly_name="WaterH Daily Goal", icon="mdi:target-variant")
 
     # Start command HTTP server
     await start_cmd_server()
