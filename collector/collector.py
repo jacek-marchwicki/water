@@ -554,6 +554,8 @@ HTML_DASHBOARD = """<!DOCTYPE html>
   .quick-btn:hover .subtext { color: #e0f2fe; }
   .slider-box { background: #0f172a; padding: 16px; border-radius: 10px; border: 1px solid #334155; }
   input[type=range] { width: 100%; accent-color: #38bdf8; cursor: pointer; height: 8px; border-radius: 4px; background: #334155; }
+  .delete-btn { background: #ef4444; color: white; border: none; padding: 4px 10px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; cursor: pointer; transition: 0.2s; }
+  .delete-btn:hover { background: #dc2626; }
 </style>
 </head>
 <body>
@@ -627,8 +629,8 @@ HTML_DASHBOARD = """<!DOCTYPE html>
   <div class="card">
     <h3 style="font-size: 1.1rem; margin-bottom: 12px;">📊 Today's Sip History</h3>
     <table>
-      <thead><tr><th>Time</th><th>Amount</th><th>Temp</th><th>TDS</th></tr></thead>
-      <tbody id="sip-rows"><tr><td colspan="4" style="color: #94a3b8;">Loading sips...</td></tr></tbody>
+      <thead><tr><th>Time</th><th>Amount</th><th>Temp</th><th>TDS</th><th>Action</th></tr></thead>
+      <tbody id="sip-rows"><tr><td colspan="5" style="color: #94a3b8;">Loading sips...</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -657,10 +659,11 @@ async function loadData() {
           <td style="color:#38bdf8; font-weight:600;">+${s.intake_ml} mL</td>
           <td>${s.temp_c ? s.temp_c + ' °C' : '—'}</td>
           <td>${s.tds ? s.tds + ' ppm' : '—'}</td>
+          <td><button class="delete-btn" onclick="deleteSip(${s.id}, '${s.timestamp}')">🗑️ Delete</button></td>
         </tr>
       `).join('');
     } else {
-      tbody.innerHTML = '<tr><td colspan="4" style="color: #94a3b8;">No sips logged today yet.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="5" style="color: #94a3b8;">No sips logged today yet.</td></tr>';
     }
   } catch (e) {
     console.error("Fetch error", e);
@@ -690,6 +693,23 @@ async function logSip(ml) {
 async function logCustomSip() {
   const val = parseInt(document.getElementById('custom-slider').value);
   await logSip(val);
+}
+
+async function deleteSip(id, timestamp) {
+  if (!confirm("Are you sure you want to delete this sip entry? It will update Home Assistant and subtract the amount from your physical bottle display.")) return;
+  try {
+    const res = await fetch('./commands/delete_sip', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: id, timestamp: timestamp })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      loadData();
+    }
+  } catch (e) {
+    console.error("Delete sip error", e);
+  }
 }
 
 async function flashLED() {
@@ -739,9 +759,9 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
                 "SELECT COALESCE(SUM(intake_ml), 0) FROM sips WHERE DATE(timestamp) = DATE('now')"
             ).fetchone()[0]
             rows = db.execute(
-                "SELECT timestamp, intake_ml, temp_c, tds FROM sips ORDER BY timestamp DESC LIMIT 50"
+                "SELECT id, timestamp, intake_ml, temp_c, tds FROM sips ORDER BY timestamp DESC LIMIT 50"
             ).fetchall()
-            sips = [{"timestamp": r[0], "intake_ml": r[1], "temp_c": r[2], "tds": r[3]} for r in rows]
+            sips = [{"id": r[0], "timestamp": r[1], "intake_ml": r[2], "temp_c": r[3], "tds": r[4]} for r in rows]
             resp = {
                 "bottle": BOTTLE_ADDR,
                 "today_ml": total_today,
@@ -801,6 +821,29 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
                 send_json(writer, 200, {"ok": True, "added_ml": ml, "today_total_ml": total_today})
             else:
                 send_json(writer, 400, {"error": "invalid ml"})
+
+        elif method == "POST" and path in ["/commands/delete_sip", "/api/sips/delete"]:
+            data = json.loads(body) if body else {}
+            sip_id = data.get("id")
+            timestamp = data.get("timestamp")
+            db = init_db()
+            if sip_id is not None:
+                db.execute("DELETE FROM sips WHERE id = ?", (sip_id,))
+                db.commit()
+            elif timestamp:
+                db.execute("DELETE FROM sips WHERE timestamp = ?", (timestamp,))
+                db.commit()
+            else:
+                send_json(writer, 400, {"error": "missing id or timestamp"})
+                return
+
+            total_today = db.execute(
+                "SELECT COALESCE(SUM(intake_ml), 0) FROM sips WHERE DATE(timestamp) = DATE('now')"
+            ).fetchone()[0]
+            publish_ha_sensor("today_intake", total_today, unit="mL", friendly_name="WaterH Today Intake", icon="mdi:cup-water", device_class="water", state_class="total_increasing")
+            if cmd_queue:
+                cmd_queue.put_nowait((cmd_sync_today_amount(total_today), f"sync-display {total_today}ml"))
+            send_json(writer, 200, {"ok": True, "today_total_ml": total_today})
 
         elif method == "POST" and path == "/commands/reminder":
             data = json.loads(body) if body else {}
