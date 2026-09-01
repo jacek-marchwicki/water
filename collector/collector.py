@@ -1077,6 +1077,47 @@ async def find_waterh_device(target_addr: str, timeout: float = 12.0):
     return None
 
 
+def resolve_gatt_characteristics(client):
+    """Dynamically discover write and notify characteristic UUIDs on the connected WaterH bottle."""
+    global WRITE_CHAR, NOTIFY_CHAR
+    discovered_write = None
+    discovered_notify = None
+
+    try:
+        for service in client.services:
+            for char in service.characteristics:
+                uuid_lower = char.uuid.lower()
+                props = [p.lower() for p in char.properties]
+
+                # Look for write / write-without-response characteristic
+                if any(p in props for p in ["write-without-response", "write"]):
+                    if any(k in uuid_lower for k in ["ffe9", "ffe5", "ffe1", "ffe2"]):
+                        discovered_write = char.uuid
+                    elif not discovered_write:
+                        discovered_write = char.uuid
+
+                # Look for notify / indicate characteristic
+                if any(p in props for p in ["notify", "indicate"]):
+                    if any(k in uuid_lower for k in ["ffe4", "ffe1"]):
+                        discovered_notify = char.uuid
+                    elif not discovered_notify:
+                        discovered_notify = char.uuid
+
+        if discovered_write:
+            log.info(f"[BLE] Resolved WRITE characteristic: {discovered_write}")
+            WRITE_CHAR = discovered_write
+        else:
+            log.warning(f"[BLE] Using default WRITE characteristic: {WRITE_CHAR}")
+
+        if discovered_notify:
+            log.info(f"[BLE] Resolved NOTIFY characteristic: {discovered_notify}")
+            NOTIFY_CHAR = discovered_notify
+        else:
+            log.warning(f"[BLE] Using default NOTIFY characteristic: {NOTIFY_CHAR}")
+    except Exception as e:
+        log.warning(f"[BLE] Failed to resolve GATT characteristics: {e}")
+
+
 def drain_queue(q: asyncio.Queue) -> list[bytes]:
     items = []
     while not q.empty():
@@ -1089,7 +1130,21 @@ def drain_queue(q: asyncio.Queue) -> list[bytes]:
 
 async def ble_write(client, cmd: bytes, label: str):
     log.info(f"[BLE] >> {label} ({cmd.hex(' ')})")
-    await client.write_gatt_char(WRITE_CHAR, cmd, response=False)
+    try:
+        await client.write_gatt_char(WRITE_CHAR, cmd, response=False)
+    except Exception as e:
+        log.warning(f"[BLE] Write to {WRITE_CHAR} failed ({e}), searching for fallback GATT characteristic...")
+        for service in client.services:
+            for char in service.characteristics:
+                props = [p.lower() for p in char.properties]
+                if any(p in props for p in ["write-without-response", "write"]):
+                    try:
+                        await client.write_gatt_char(char.uuid, cmd, response=False)
+                        log.info(f"[BLE] Successfully wrote command via fallback characteristic: {char.uuid}")
+                        return
+                    except Exception:
+                        pass
+        raise e
 
 
 async def ble_write_and_wait(client, cmd: bytes, label: str, queue: asyncio.Queue, wait: float = 2.0) -> list[bytes]:
@@ -1244,6 +1299,8 @@ async def ble_loop():
             async with BleakClient(device, disconnected_callback=on_disconnect) as client:
                 log.info(f"[BLE] Connected to {device.name}")
                 post_heartbeat("connected")
+
+                resolve_gatt_characteristics(client)
 
                 def on_notify(sender, data: bytearray):
                     packet_queue.put_nowait(bytes(data))
