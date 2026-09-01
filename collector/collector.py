@@ -1100,7 +1100,7 @@ def resolve_gatt_characteristics(client):
                 if any(p in props for p in ["notify", "indicate"]):
                     if any(k in uuid_lower for k in ["ffe4", "ffe1"]):
                         discovered_notify = char.uuid
-                    elif not discovered_notify:
+                    elif not discovered_notify and not uuid_lower.startswith("00002a"):
                         discovered_notify = char.uuid
 
         if discovered_write:
