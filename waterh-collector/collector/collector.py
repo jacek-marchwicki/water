@@ -354,7 +354,7 @@ class HAConnection:
         self.publish_state("sensor/status", "scanning")
 
     def publish_state(self, entity_subpath: str, value):
-        if self.connected and self.client:
+        if self.client:
             topic = f"waterh/{entity_subpath}/state"
             self.client.publish(topic, str(value), retain=True)
 
@@ -617,15 +617,28 @@ def send_json(writer: asyncio.StreamWriter, status: int, data: dict):
     )
 
 
-def send_html(writer: asyncio.StreamWriter, status: int, html: str):
-    body = html.encode("utf-8")
-    writer.write(
-        f"HTTP/1.1 {status} OK\r\n"
-        f"Content-Type: text/html; charset=utf-8\r\n"
-        f"Content-Length: {len(body)}\r\n"
-        f"Access-Control-Allow-Origin: *\r\n"
-        f"\r\n".encode("utf-8") + body
-    )
+def publish_ha_sensor(
+    entity_name: str,
+    state_value,
+    unit: str = "",
+    friendly_name: str = "",
+    icon: str = "",
+    device_class: str = "",
+    state_class: str = ""
+):
+    """Publish sensor state via MQTT if enabled; fallback to Direct REST API ONLY if MQTT is disabled."""
+    if ha_conn:
+        ha_conn.publish_state(f"sensor/{entity_name}", state_value)
+    elif ha_api:
+        ha_api.update_sensor(
+            entity_name,
+            state_value,
+            unit=unit,
+            friendly_name=friendly_name,
+            icon=icon,
+            device_class=device_class,
+            state_class=state_class,
+        )
 
 
 HTML_DASHBOARD = """<!DOCTYPE html>
@@ -901,30 +914,6 @@ def push_to_remote(db):
 
 
 # --- Heartbeat & HA Sensor Publishing ---
-
-def publish_ha_sensor(
-    entity_name: str,
-    state_value,
-    unit: str = "",
-    friendly_name: str = "",
-    icon: str = "",
-    device_class: str = "",
-    state_class: str = ""
-):
-    """Publish sensor state via MQTT if connected; fallback to Direct REST API."""
-    if ha_conn and ha_conn.connected:
-        ha_conn.publish_state(f"sensor/{entity_name}", state_value)
-    elif ha_api:
-        ha_api.update_sensor(
-            entity_name,
-            state_value,
-            unit=unit,
-            friendly_name=friendly_name,
-            icon=icon,
-            device_class=device_class,
-            state_class=state_class,
-        )
-
 
 def post_heartbeat(state: str, detail: str = ""):
     status_val = f"{state}: {detail}" if detail else state
