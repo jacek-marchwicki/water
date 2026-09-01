@@ -143,7 +143,7 @@ async function loadToday() {
               <td>${t}</td>
               <td>${s.intake_ml} ml</td>
               <td>${s.temp_c ?? "—"}°C</td>
-              <td><div class="bar"><div class="bar-fill" style="width:${pct}%"></div></div></td>
+              <td><button class="delete-btn" onclick="deleteSip(${s.id}, '${s.timestamp}')">🗑️ Delete</button></td>
             </tr>`;
             })
             .join("");
@@ -162,12 +162,11 @@ async function loadToday() {
               tr.className = "animate-in";
               tr.style.animationDelay = `${i * 0.04}s`;
               const t = new Date(s.timestamp).toLocaleTimeString();
-              const pct = Math.round((s.intake_ml / maxMl) * 100);
               tr.innerHTML = `
               <td>${t}</td>
               <td>${s.intake_ml} ml</td>
               <td>${s.temp_c ?? "—"}°C</td>
-              <td><div class="bar"><div class="bar-fill" style="width:${pct}%"></div></div></td>`;
+              <td><button class="delete-btn" onclick="deleteSip(${s.id}, '${s.timestamp}')">🗑️ Delete</button></td>`;
               fragment.appendChild(tr);
             });
             tbody.insertBefore(fragment, tbody.firstChild);
@@ -377,3 +376,57 @@ function timeAgo(iso) {
 // --- Init ---
 loadToday();
 startPolling();
+
+// --- Interactive Actions ---
+window.updateSliderText = function(val) {
+  const el = document.getElementById("slider-val");
+  if (el) el.innerText = val;
+};
+
+window.logSip = async function(ml) {
+  try {
+    const res = await fetch("./commands/intake", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ml: ml })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      loadToday();
+    }
+  } catch (e) {
+    console.error("Log sip error", e);
+  }
+};
+
+window.logCustomSip = async function() {
+  const val = parseInt(document.getElementById("custom-slider").value);
+  await window.logSip(val);
+};
+
+window.deleteSip = async function(id, timestamp) {
+  if (!confirm("Are you sure you want to delete this sip entry? It will update Home Assistant and subtract the amount from your physical bottle display.")) return;
+  try {
+    const res = await fetch("./commands/delete_sip", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: id, timestamp: timestamp })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      loadToday();
+    }
+  } catch (e) {
+    console.error("Delete sip error", e);
+  }
+};
+
+window.flashLED = async function() {
+  await fetch("./commands/flash", { method: "POST" });
+  alert("Flash command queued!");
+};
+
+window.setLED = async function() {
+  const mode = document.getElementById("led-select").value;
+  await fetch("./commands/led", { method: "POST", body: JSON.stringify({ mode: mode, color: "blue" }) });
+};

@@ -48,8 +48,48 @@
             <div class="stat-value"><span id="today-pct">0</span><span class="unit">%</span></div>
           </div>
         </div>
+        <div class="card manual-card" style="margin-bottom: 20px;">
+          <h3 style="font-size: 1rem; margin-bottom: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">➕ Log Drink Manually</h3>
+          
+          <div style="font-size: 0.75rem; color: #94a3b8; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Quick Log</div>
+          <div class="quick-buttons">
+            <button class="quick-btn" onclick="logSip(120)">☕ Small Cup<span class="subtext">120 mL</span></button>
+            <button class="quick-btn" onclick="logSip(200)">🥛 Large Cup<span class="subtext">200 mL</span></button>
+            <button class="quick-btn" onclick="logSip(310)">🍵 Mug<span class="subtext">310 mL</span></button>
+            <button class="quick-btn" onclick="logSip(700)">🚴 Bidon<span class="subtext">700 mL</span></button>
+          </div>
+
+          <div style="font-size: 0.75rem; color: #94a3b8; margin-bottom: 8px; margin-top: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Custom Amount</div>
+          <div class="slider-box">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <span style="color:#94a3b8; font-size:0.9rem;">Select Amount:</span>
+              <span style="font-size:1.3rem; font-weight:700; color:#38bdf8;"><span id="slider-val">250</span> <span style="font-size:0.85rem; color:#94a3b8;">mL</span></span>
+            </div>
+            <input type="range" id="custom-slider" min="50" max="1000" step="10" value="250" oninput="updateSliderText(this.value)">
+            <div style="display:flex; justify-content:space-between; font-size:0.75rem; color:#64748b; margin-top:6px;">
+              <span>50 mL</span>
+              <span>500 mL</span>
+              <span>1000 mL</span>
+            </div>
+            <button class="action-btn" style="margin-top: 12px; width: 100%;" onclick="logCustomSip()">💧 Log Custom Drink</button>
+          </div>
+        </div>
+
+        <div class="card controls-card" style="margin-bottom: 20px;">
+          <h3 style="font-size: 1rem; margin-bottom: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">⚡ Interactive Controls</h3>
+          <div class="controls-row" style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+            <button class="action-btn" onclick="flashLED()">💡 Flash LED</button>
+            <select id="led-select" onchange="setLED()" style="background:#1e1e1e; color:white; border:1px solid #333; padding:10px; border-radius:6px; flex:1; min-width:180px;">
+              <option value="default">LED Mode: Default</option>
+              <option value="breathe">LED Mode: Breathe</option>
+              <option value="rainbow">LED Mode: Rainbow</option>
+              <option value="off">LED Mode: Off</option>
+            </select>
+          </div>
+        </div>
+
         <table>
-          <thead><tr><th>Time</th><th>Amount</th><th>Temp</th><th></th></tr></thead>
+          <thead><tr><th>Time</th><th>Amount</th><th>Temp</th><th>Action</th></tr></thead>
           <tbody id="sip-table"></tbody>
         </table>
       </section>

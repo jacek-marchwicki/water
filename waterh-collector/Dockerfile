@@ -17,6 +17,7 @@ RUN pip3 install --no-cache-dir --break-system-packages \
 # Set workdir and copy code
 WORKDIR /app
 COPY collector/ /app/collector/
+COPY frontend/ /app/frontend/
 COPY run.sh /app/run.sh
 
 RUN chmod +x /app/run.sh

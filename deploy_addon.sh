@@ -16,10 +16,12 @@ echo " SSH Port:    ${HA_PORT}"
 echo " Destination: ${DEST_DIR}"
 echo "------------------------------------------"
 
-# Sync single source of truth collector.py into waterh-collector package
-echo "--> Syncing single-source-of-truth collector/collector.py..."
+# Sync single source of truth collector.py and frontend directory
+echo "--> Syncing single-source-of-truth collector.py & frontend directory..."
 mkdir -p "$SCRIPT_DIR/waterh-collector/collector"
 cp "$SCRIPT_DIR/collector/collector.py" "$SCRIPT_DIR/waterh-collector/collector/collector.py"
+rm -rf "$SCRIPT_DIR/waterh-collector/frontend"
+cp -r "$SCRIPT_DIR/frontend" "$SCRIPT_DIR/waterh-collector/frontend"
 
 echo "--> Copying add-on files via tar stream over SSH..."
 ssh -p "${HA_PORT}" "${HA_HOST}" "mkdir -p '${DEST_DIR}'"

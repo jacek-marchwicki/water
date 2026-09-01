@@ -488,7 +488,14 @@ ha_api = HARestAPI(SUPERVISOR_TOKEN) if SUPERVISOR_TOKEN else None
 cmd_queue: asyncio.Queue[tuple[bytes, str]] | None = None
 
 
-# --- Command HTTP server & Ingress Web UI ---
+# --- Command HTTP server & Static File Handler ---
+
+FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
+if not FRONTEND_DIR.exists():
+    FRONTEND_DIR = Path("/addons/waterh-collector/frontend")
+if not FRONTEND_DIR.exists():
+    FRONTEND_DIR = Path("/app/frontend")
+
 
 def send_json(writer: asyncio.StreamWriter, status: int, data: dict):
     body = json.dumps(data).encode()
@@ -502,11 +509,36 @@ def send_json(writer: asyncio.StreamWriter, status: int, data: dict):
     )
 
 
-def send_html(writer: asyncio.StreamWriter, status: int, html: str):
-    body = html.encode("utf-8")
+def serve_static_file(writer: asyncio.StreamWriter, status: int, relative_path: str):
+    rel = relative_path.lstrip("/")
+    if not rel or rel in ["index.html", "ingress"] or rel.startswith("ingress"):
+        rel = "index.html"
+    file_path = (FRONTEND_DIR / rel).resolve()
+
+    if not file_path.is_file():
+        # Fallback to index.html for SPA routes if file doesn't exist
+        file_path = (FRONTEND_DIR / "index.html").resolve()
+
+    if not file_path.is_file():
+        send_json(writer, 404, {"error": f"File {rel} not found"})
+        return
+
+    ext = file_path.suffix.lower()
+    content_type = {
+        ".html": "text/html; charset=utf-8",
+        ".css": "text/css; charset=utf-8",
+        ".js": "application/javascript; charset=utf-8",
+        ".json": "application/json; charset=utf-8",
+        ".svg": "image/svg+xml",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".ico": "image/x-icon",
+    }.get(ext, "text/plain; charset=utf-8")
+
+    body = file_path.read_bytes()
     writer.write(
         f"HTTP/1.1 {status} OK\r\n"
-        f"Content-Type: text/html; charset=utf-8\r\n"
+        f"Content-Type: {content_type}\r\n"
         f"Content-Length: {len(body)}\r\n"
         f"Cache-Control: no-cache, no-store, must-revalidate\r\n"
         f"Pragma: no-cache\r\n"
@@ -516,221 +548,8 @@ def send_html(writer: asyncio.StreamWriter, status: int, html: str):
     )
 
 
-HTML_DASHBOARD = """<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>WaterH Smart Bottle Dashboard</title>
-<style>
-  :root { --bg: #0f172a; --card: #1e293b; --accent: #38bdf8; --text: #f8fafc; --text-muted: #94a3b8; --border: #334155; }
-  * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-  body { background: var(--bg); color: var(--text); padding: 20px; display: flex; justify-content: center; }
-  .container { max-width: 800px; width: 100%; display: flex; flex-direction: column; gap: 20px; }
-  header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
-  h1 { font-size: 1.5rem; display: flex; align-items: center; gap: 8px; }
-  .badge { background: #0284c7; color: #fff; font-size: 0.75rem; padding: 4px 10px; border-radius: 99px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; }
-  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 8px; }
-  .card-label { font-size: 0.85rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
-  .card-val { font-size: 1.8rem; font-weight: 700; color: var(--accent); }
-  .unit { font-size: 1rem; color: var(--text-muted); font-weight: 400; margin-left: 4px; }
-  .ring-container { display: flex; flex-direction: column; align-items: center; padding: 20px; background: var(--card); border: 1px solid var(--border); border-radius: 16px; }
-  .ring-svg { width: 180px; height: 180px; transform: rotate(-90deg); }
-  .ring-bg { fill: none; stroke: var(--border); stroke-width: 14; }
-  .ring-fill { fill: none; stroke: var(--accent); stroke-width: 14; stroke-linecap: round; stroke-dasharray: 440; stroke-dashoffset: 440; transition: stroke-dashoffset 1s ease; }
-  .ring-text { position: absolute; text-align: center; margin-top: 55px; }
-  .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; }
-  button { background: #0284c7; color: white; border: none; padding: 12px 18px; border-radius: 8px; font-weight: 600; cursor: pointer; transition: 0.2s; }
-  button:hover { background: #0369a1; }
-  select { background: #0f172a; color: white; border: 1px solid var(--border); padding: 10px; border-radius: 8px; width: 100%; }
-  table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-  th, td { text-align: left; padding: 10px; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
-  th { color: var(--text-muted); }
-  .quick-buttons { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 15px; }
-  .quick-btn { background: #0f172a; border: 1px solid #334155; color: #f8fafc; padding: 12px 10px; border-radius: 10px; font-size: 0.95rem; text-align: center; cursor: pointer; transition: all 0.2s; font-weight: 600; }
-  .quick-btn:hover { background: #0284c7; border-color: #38bdf8; transform: translateY(-2px); }
-  .subtext { font-size: 0.75rem; color: #94a3b8; font-weight: 400; display: block; margin-top: 2px; }
-  .quick-btn:hover .subtext { color: #e0f2fe; }
-  .slider-box { background: #0f172a; padding: 16px; border-radius: 10px; border: 1px solid #334155; }
-  input[type=range] { width: 100%; accent-color: #38bdf8; cursor: pointer; height: 8px; border-radius: 4px; background: #334155; }
-  .delete-btn { background: #ef4444; color: white; border: none; padding: 4px 10px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; cursor: pointer; transition: 0.2s; }
-  .delete-btn:hover { background: #dc2626; }
-</style>
-</head>
-<body>
-<div class="container">
-  <header>
-    <h1>💧 WaterH Smart Bottle</h1>
-    <span id="mac-badge" class="badge">A4:C1:38:F3:63:2D</span>
-  </header>
-
-  <div class="ring-container">
-    <div style="position:relative; width:180px; height:180px;">
-      <svg class="ring-svg" viewBox="0 0 160 160">
-        <circle class="ring-bg" cx="80" cy="80" r="70"></circle>
-        <circle id="ring" class="ring-fill" cx="80" cy="80" r="70"></circle>
-      </svg>
-      <div class="ring-text">
-        <div id="ml-val" style="font-size: 2rem; font-weight: 700; color: #38bdf8;">0</div>
-        <div style="font-size: 0.85rem; color: #94a3b8;">/ <span id="goal-val">2500</span> mL</div>
-      </div>
-    </div>
-  </div>
-
-  <div class="grid">
-    <div class="card"><div class="card-label">Progress</div><div class="card-val"><span id="pct-val">0</span><span class="unit">%</span></div></div>
-    <div class="card"><div class="card-label">Total Sips</div><div class="card-val"><span id="sips-val">0</span></div></div>
-    <div class="card"><div class="card-label">Goal Target</div><div class="card-val"><span id="target-val">2500</span><span class="unit">mL</span></div></div>
-  </div>
-
-  <div class="card">
-    <h3 style="font-size: 1.1rem; margin-bottom: 12px;">➕ Log Drink Manually</h3>
-    
-    <div style="font-size: 0.75rem; color: #94a3b8; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Quick Log</div>
-    <div class="quick-buttons">
-      <button class="quick-btn" onclick="logSip(120)">☕ Small Cup<span class="subtext">120 mL</span></button>
-      <button class="quick-btn" onclick="logSip(200)">🥛 Large Cup<span class="subtext">200 mL</span></button>
-      <button class="quick-btn" onclick="logSip(310)">🍵 Mug<span class="subtext">310 mL</span></button>
-      <button class="quick-btn" onclick="logSip(700)">🚴 Bidon<span class="subtext">700 mL</span></button>
-    </div>
-
-    <div style="font-size: 0.75rem; color: #94a3b8; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Custom Amount</div>
-    <div class="slider-box">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-        <span style="color:#94a3b8; font-size:0.9rem;">Select Amount:</span>
-        <span style="font-size:1.4rem; font-weight:700; color:#38bdf8;"><span id="slider-val">250</span> <span style="font-size:0.9rem; color:#94a3b8;">mL</span></span>
-      </div>
-      <input type="range" id="custom-slider" min="50" max="1000" step="10" value="250" oninput="updateSliderText(this.value)">
-      <div style="display:flex; justify-content:space-between; font-size:0.75rem; color:#64748b; margin-top:6px;">
-        <span>50 mL</span>
-        <span>500 mL</span>
-        <span>1000 mL</span>
-      </div>
-      <button style="margin-top: 14px; width: 100%; background: #0284c7;" onclick="logCustomSip()">💧 Log Custom Drink</button>
-    </div>
-  </div>
-
-  <div class="card">
-    <h3 style="font-size: 1.1rem; margin-bottom: 12px;">⚡ Interactive Controls</h3>
-    <div class="controls">
-      <button onclick="flashLED()">💡 Flash LED</button>
-      <div style="display:flex; gap:8px;">
-        <select id="led-select" onchange="setLED()">
-          <option value="default">LED Mode: Default</option>
-          <option value="breathe">LED Mode: Breathe</option>
-          <option value="rainbow">LED Mode: Rainbow</option>
-          <option value="off">LED Mode: Off</option>
-        </select>
-      </div>
-    </div>
-  </div>
-
-  <div class="card">
-    <h3 style="font-size: 1.1rem; margin-bottom: 12px;">📊 Today's Sip History</h3>
-    <table>
-      <thead><tr><th>Time</th><th>Amount</th><th>Temp</th><th>TDS</th><th>Action</th></tr></thead>
-      <tbody id="sip-rows"><tr><td colspan="5" style="color: #94a3b8;">Loading sips...</td></tr></tbody>
-    </table>
-  </div>
-</div>
-
-<script>
-async function loadData() {
-  try {
-    const res = await fetch('./api/data');
-    const data = await res.json();
-    document.getElementById('ml-val').innerText = data.today_ml;
-    document.getElementById('goal-val').innerText = data.goal_ml;
-    document.getElementById('pct-val').innerText = data.pct;
-    document.getElementById('sips-val').innerText = data.sips_count;
-    document.getElementById('target-val').innerText = data.goal_ml;
-    if (data.bottle) document.getElementById('mac-badge').innerText = data.bottle;
-    
-    const circ = 440;
-    const offset = circ - (Math.min(data.pct, 100) / 100) * circ;
-    document.getElementById('ring').style.strokeDashoffset = offset;
-
-    const tbody = document.getElementById('sip-rows');
-    if (data.sips && data.sips.length > 0) {
-      tbody.innerHTML = data.sips.map(s => `
-        <tr>
-          <td>${new Date(s.timestamp).toLocaleTimeString()}</td>
-          <td style="color:#38bdf8; font-weight:600;">+${s.intake_ml} mL</td>
-          <td>${s.temp_c ? s.temp_c + ' °C' : '—'}</td>
-          <td>${s.tds ? s.tds + ' ppm' : '—'}</td>
-          <td><button class="delete-btn" onclick="deleteSip(${s.id}, '${s.timestamp}')">🗑️ Delete</button></td>
-        </tr>
-      `).join('');
-    } else {
-      tbody.innerHTML = '<tr><td colspan="5" style="color: #94a3b8;">No sips logged today yet.</td></tr>';
-    }
-  } catch (e) {
-    console.error("Fetch error", e);
-  }
-}
-
-function updateSliderText(val) {
-  document.getElementById('slider-val').innerText = val;
-}
-
-async function logSip(ml) {
-  try {
-    const res = await fetch('./commands/intake', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ml: ml })
-    });
-    const data = await res.json();
-    if (data.ok) {
-      loadData();
-    }
-  } catch (e) {
-    console.error("Log sip error", e);
-  }
-}
-
-async function logCustomSip() {
-  const val = parseInt(document.getElementById('custom-slider').value);
-  await logSip(val);
-}
-
-async function deleteSip(id, timestamp) {
-  if (!confirm("Are you sure you want to delete this sip entry? It will update Home Assistant and subtract the amount from your physical bottle display.")) return;
-  try {
-    const res = await fetch('./commands/delete_sip', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: id, timestamp: timestamp })
-    });
-    const data = await res.json();
-    if (data.ok) {
-      loadData();
-    }
-  } catch (e) {
-    console.error("Delete sip error", e);
-  }
-}
-
-async function flashLED() {
-  await fetch('./commands/flash', { method: 'POST' });
-  alert("Flash command queued!");
-}
-
-async function setLED() {
-  const mode = document.getElementById('led-select').value;
-  await fetch('./commands/led', { method: 'POST', body: JSON.stringify({ mode: mode, color: 'blue' }) });
-}
-
-loadData();
-setInterval(loadData, 5000);
-</script>
-</body>
-</html>"""
-
-
 async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
-    """Minimal HTTP handler for /commands endpoint."""
+    """Minimal HTTP handler for Web UI and /commands endpoint."""
     try:
         request_line = await asyncio.wait_for(reader.readline(), timeout=5)
         request_str = request_line.decode(errors="replace")
@@ -751,7 +570,56 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
         path = request_str.split(" ")[1] if len(request_str.split(" ")) > 1 else "/"
 
         if method == "GET" and (path in ["/", "/index.html", "/ingress"] or path.startswith("/ingress")):
-            send_html(writer, 200, HTML_DASHBOARD)
+            serve_static_file(writer, 200, "index.html")
+
+        elif method == "GET" and path == "/api/today":
+            db = init_db()
+            total_today = db.execute(
+                "SELECT COALESCE(SUM(intake_ml), 0) FROM sips WHERE DATE(timestamp) = DATE('now')"
+            ).fetchone()[0]
+            rows = db.execute(
+                "SELECT id, timestamp, intake_ml, temp_c, tds FROM sips WHERE DATE(timestamp) = DATE('now') ORDER BY timestamp DESC"
+            ).fetchall()
+            sips = [{"id": r[0], "timestamp": r[1], "intake_ml": r[2], "temp_c": r[3], "tds": r[4]} for r in rows]
+            last_temp = rows[0][3] if rows and rows[0][3] else None
+            resp = {
+                "total_ml": total_today,
+                "goal_pct": round((total_today / GOAL_ML) * 100) if GOAL_ML else 0,
+                "sip_count": len(rows),
+                "last_temp_c": last_temp,
+                "sips": sips,
+            }
+            send_json(writer, 200, resp)
+
+        elif method == "GET" and path == "/api/status":
+            resp = {
+                "state": "connected",
+                "online": True,
+                "last_seen": datetime.now().isoformat(),
+                "bottle": BOTTLE_ADDR,
+            }
+            send_json(writer, 200, resp)
+
+        elif method == "GET" and path.startswith("/api/history"):
+            db = init_db()
+            rows = db.execute("""
+                SELECT DATE(timestamp) as day, SUM(intake_ml) as total_ml, COUNT(*) as sips
+                FROM sips
+                GROUP BY DATE(timestamp)
+                ORDER BY day ASC
+                LIMIT 90
+            """).fetchall()
+            days = [{"date": r[0], "total_ml": r[1], "sips": r[2]} for r in rows]
+            totals = [r[1] for r in rows]
+            avg_daily = round(sum(totals) / len(totals)) if totals else 0
+            best_day = max(totals) if totals else 0
+            resp = {
+                "days": days,
+                "avg_daily_ml": avg_daily,
+                "best_day_ml": best_day,
+                "current_streak": len(days),
+            }
+            send_json(writer, 200, resp)
 
         elif method == "GET" and (path.startswith("/api/data") or path == "/api/data"):
             db = init_db()
@@ -870,6 +738,9 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
             else:
                 cmd_queue.put_nowait((bytes.fromhex(hex_str), f"raw {hex_str}"))
                 send_json(writer, 200, {"ok": True, "queued": f"raw {hex_str}"})
+
+        elif method == "GET" and not path.startswith("/api/") and not path.startswith("/commands"):
+            serve_static_file(writer, 200, path)
 
         else:
             send_json(writer, 404, {"error": "not found"})

@@ -353,3 +353,26 @@ tbody tr.animate-in {
   .heatmap-cell { width: 10px; height: 10px; }
   td { padding: 6px 8px; font-size: 0.75em; }
 }
+
+/* --- Interactive Manual Logging & Controls --- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.quick-buttons { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+.quick-btn { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 12px 10px; border-radius: 8px; font-size: 0.9rem; text-align: center; cursor: pointer; transition: all 0.2s; font-weight: 600; }
+.quick-btn:hover { background: #0284c7; border-color: #38bdf8; color: #fff; transform: translateY(-2px); }
+.subtext { font-size: 0.75rem; color: var(--text-dim); font-weight: 400; display: block; margin-top: 2px; }
+.quick-btn:hover .subtext { color: #e0f2fe; }
+
+.slider-box { background: var(--bg); padding: 16px; border-radius: 8px; border: 1px solid var(--border); }
+input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; height: 8px; border-radius: 4px; background: var(--border); }
+
+.action-btn { background: #0284c7; color: white; border: none; padding: 10px 16px; border-radius: 6px; font-weight: 600; cursor: pointer; transition: 0.2s; }
+.action-btn:hover { background: #0369a1; }
+
+.delete-btn { background: #ef4444; color: white; border: none; padding: 4px 10px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; cursor: pointer; transition: 0.2s; }
+.delete-btn:hover { background: #dc2626; }
