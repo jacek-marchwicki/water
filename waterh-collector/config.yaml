@@ -1,7 +1,7 @@
 name: "WaterH Smart Bottle Collector"
 slug: "waterh_collector"
-version: "1.0.7"
-description: "BLE Collector for WaterH Smart Water Bottle with Home Assistant MQTT Discovery"
+version: "1.0.8"
+description: "BLE Collector for WaterH Smart Water Bottle with Home Assistant MQTT Discovery & Ingress Web UI"
 url: "https://github.com/sylvexn/water"
 arch:
   - aarch64
@@ -10,6 +10,15 @@ arch:
 init: false
 host_dbus: true
 bluetooth: true
+webui: "http://[HOST]:[PORT:7700]"
+ingress: true
+ingress_port: 7700
+panel_icon: "mdi:water"
+panel_title: "WaterH Bottle"
+ports:
+  7700/tcp: 7700
+ports_description:
+  7700/tcp: "Web UI & Command API"
 hassio_role: default
 hassio_api: true
 homeassistant_api: true
