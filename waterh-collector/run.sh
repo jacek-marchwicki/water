@@ -15,14 +15,7 @@ if [ -f "$CONFIG_PATH" ]; then
     export MQTT_PASSWORD=$(jq -r '.mqtt_password // ""' $CONFIG_PATH)
     export MQTT_TOPIC_PREFIX=$(jq -r '.mqtt_topic_prefix // "homeassistant"' $CONFIG_PATH)
 
-    ENABLE_API_PUSH=$(jq -r '.enable_api_push // false' $CONFIG_PATH)
-    if [ "$ENABLE_API_PUSH" = "true" ]; then
-        export WATERH_API_URL=$(jq -r '.api_url // ""' $CONFIG_PATH)
-        export WATERH_API_TOKEN=$(jq -r '.api_token // ""' $CONFIG_PATH)
-    else
-        export WATERH_API_URL=""
-        export WATERH_API_TOKEN=""
-    fi
+
 else
     echo "[WaterH Add-on] /data/options.json not found, using environment defaults"
 fi

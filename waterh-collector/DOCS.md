@@ -27,24 +27,31 @@ This add-on connects to your **WaterH Smart Water Bottle** over Bluetooth Low En
 
 ---
 
+## 📱 Finding Your Bottle MAC Address
+
+You can easily locate your WaterH bottle's Bluetooth MAC address:
+1. **WaterH Mobile App**: Open the official **WaterH** app on your iOS or Android phone -> open device settings -> scroll all the way to the **bottom of the screen** to see your bottle's Bluetooth MAC address (e.g. `A4:C1:38:F3:63:2D`).
+2. **nRF Connect App**: Open **nRF Connect for Mobile**, scan for nearby Bluetooth devices, and locate `WaterH-Boost` or `WaterH`.
+
+---
+
 ## ⚙️ Configuration Options
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `bottle_address` | String | `A4:C1:38:32:D7:DE` | Bluetooth MAC Address of your WaterH bottle. |
+| `bottle_address` | String | `A4:C1:38:F3:63:2D` | Bluetooth MAC Address of your WaterH bottle (found at bottom of screen in WaterH app). |
 | `poll_interval` | Integer | `60` | Polling interval in seconds between sync cycles. |
 | `goal_ml` | Integer | `2500` | Target daily intake in mL. |
 | `mqtt_host` | String | `core-mosquitto` | Address of your MQTT broker (`core-mosquitto` for built-in HA broker). |
 | `mqtt_port` | Integer | `1883` | MQTT port. |
-| `mqtt_user` | String | `""` | MQTT username (leave blank if Mosquitto authentication is unneeded/auto). |
+| `mqtt_user` | String | `""` | MQTT username (auto-provisioned by Home Assistant if left blank). |
 | `mqtt_password` | String | `""` | MQTT password. |
-| `enable_api_push` | Boolean | `false` | Enable pushing sip records to an external WaterH REST API. |
 
 ---
 
 ## 📋 Installation Steps
 
-1. Copy the `waterh-collector` directory into your Home Assistant `/addons/` folder (via Samba, SSH, or Studio Code Server add-on).
+1. Copy the `waterh-collector` directory into your Home Assistant `/addons/` folder (or deploy via `./deploy_addon.sh`).
 2. Go to **Settings -> Add-ons -> Add-on Store**.
 3. Click the **⋮ (Menu)** in the top-right corner -> **Check for new add-ons**.
 4. Scroll down to **Local Add-ons** and select **WaterH Smart Bottle Collector**.

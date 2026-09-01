@@ -1124,30 +1124,7 @@ def mark_synced(db, ids):
     db.commit()
 
 
-# --- Remote push ---
 
-def push_to_remote(db):
-    if not API_TOKEN:
-        return
-    unsynced = get_unsynced(db)
-    if not unsynced:
-        return
-    payload = json.dumps({"sips": unsynced}).encode()
-    req = urllib.request.Request(
-        API_URL, data=payload,
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {API_TOKEN}"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            if resp.status == 200:
-                ids = [s["id"] for s in unsynced]
-                mark_synced(db, ids)
-                log.info(f"[PUSH] Pushed {len(ids)} sips to remote")
-            else:
-                log.warning(f"[PUSH] Remote returned {resp.status}")
-    except Exception as e:
-        log.warning(f"[PUSH] Failed: {e}")
 
 
 # --- Heartbeat & HA Sensor Publishing ---
@@ -1327,7 +1304,6 @@ async def sync_cycle(client, queue: asyncio.Queue, db) -> bool:
     await ble_write_and_wait(client, cmd_sync_today_amount(total_today), "sync-display", queue, wait=1.0)
 
     log_sync(db, len(sips), new_count, len(sips) * 13 if sips else 0)
-    push_to_remote(db)
     return True
 
 

@@ -1,6 +1,6 @@
 name: "WaterH Smart Bottle Collector"
 slug: "waterh_collector"
-version: "1.1.5"
+version: "1.2.0"
 description: "BLE Collector for WaterH Smart Water Bottle with Home Assistant MQTT Discovery & Ingress Web UI"
 url: "https://github.com/sylvexn/water"
 arch:
@@ -36,9 +36,6 @@ options:
   mqtt_user: ""
   mqtt_password: ""
   mqtt_topic_prefix: "homeassistant"
-  enable_api_push: false
-  api_url: "https://water.syl.rest/api/ingest"
-  api_token: ""
 schema:
   bottle_address: str
   poll_interval: int
@@ -48,6 +45,3 @@ schema:
   mqtt_user: str?
   mqtt_password: str?
   mqtt_topic_prefix: str
-  enable_api_push: bool
-  api_url: str
-  api_token: str?
