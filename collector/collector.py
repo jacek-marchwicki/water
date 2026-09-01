@@ -48,7 +48,10 @@ GOAL_ML = int(os.environ.get("WATERH_GOAL_ML", "2500"))
 API_URL = os.environ.get("WATERH_API_URL", "https://water.syl.rest/api/ingest")
 HEARTBEAT_URL = os.environ.get("WATERH_HEARTBEAT_URL", "https://water.syl.rest/api/heartbeat")
 API_TOKEN = os.environ.get("WATERH_API_TOKEN", "")
-DB_PATH = os.environ.get("WATERH_DB_PATH", str(Path(__file__).parent / "waterh.db"))
+DB_PATH = os.environ.get(
+    "WATERH_DB_PATH",
+    "/data/waterh.db" if Path("/data").exists() else str(Path(__file__).parent / "waterh.db")
+)
 
 CMD_PORT = int(os.environ.get("WATERH_CMD_PORT", "7700"))
 
