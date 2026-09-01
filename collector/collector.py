@@ -510,14 +510,33 @@ def send_json(writer: asyncio.StreamWriter, status: int, data: dict):
 
 
 def serve_static_file(writer: asyncio.StreamWriter, status: int, relative_path: str):
-    rel = relative_path.lstrip("/")
-    if not rel or rel in ["index.html", "ingress"] or rel.startswith("ingress"):
+    rel = relative_path
+    if "ingress" in rel:
+        parts = rel.split("ingress")
+        rel = parts[-1]
+        # Strip token if path is /_/<token>/... or /<token>/...
+        if rel.startswith("/") or rel.startswith("_"):
+            sub_parts = rel.lstrip("/").lstrip("_").lstrip("/").split("/")
+            if len(sub_parts) > 1:
+                rel = "/".join(sub_parts[1:])
+            else:
+                rel = sub_parts[0]
+
+    rel = rel.lstrip("/")
+    if not rel or rel in ["index.html"]:
         rel = "index.html"
+
     file_path = (FRONTEND_DIR / rel).resolve()
 
     if not file_path.is_file():
-        # Fallback to index.html for SPA routes if file doesn't exist
-        file_path = (FRONTEND_DIR / "index.html").resolve()
+        # Check if file exists by filename in FRONTEND_DIR or subdirectories
+        filename = rel.split("/")[-1]
+        if (FRONTEND_DIR / filename).is_file():
+            file_path = (FRONTEND_DIR / filename).resolve()
+        elif (FRONTEND_DIR / "src" / filename).is_file():
+            file_path = (FRONTEND_DIR / "src" / filename).resolve()
+        else:
+            file_path = (FRONTEND_DIR / "index.html").resolve()
 
     if not file_path.is_file():
         send_json(writer, 404, {"error": f"File {rel} not found"})

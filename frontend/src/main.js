@@ -1,6 +1,4 @@
-import Chart from "chart.js/auto";
-
-const API = "/api";
+const API = "./api";
 const POLL_INTERVAL = 10000;
 let pollTimer = null;
 
