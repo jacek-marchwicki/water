@@ -1,6 +1,6 @@
 name: "WaterH Smart Bottle Collector"
 slug: "waterh_collector"
-version: "1.1.4"
+version: "1.1.5"
 description: "BLE Collector for WaterH Smart Water Bottle with Home Assistant MQTT Discovery & Ingress Web UI"
 url: "https://github.com/sylvexn/water"
 arch:
