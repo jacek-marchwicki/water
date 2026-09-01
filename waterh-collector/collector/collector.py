@@ -544,6 +544,13 @@ HTML_DASHBOARD = """<!DOCTYPE html>
   table { width: 100%; border-collapse: collapse; margin-top: 10px; }
   th, td { text-align: left; padding: 10px; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
   th { color: var(--text-muted); }
+  .quick-buttons { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 15px; }
+  .quick-btn { background: #0f172a; border: 1px solid #334155; color: #f8fafc; padding: 12px 10px; border-radius: 10px; font-size: 0.95rem; text-align: center; cursor: pointer; transition: all 0.2s; font-weight: 600; }
+  .quick-btn:hover { background: #0284c7; border-color: #38bdf8; transform: translateY(-2px); }
+  .subtext { font-size: 0.75rem; color: #94a3b8; font-weight: 400; display: block; margin-top: 2px; }
+  .quick-btn:hover .subtext { color: #e0f2fe; }
+  .slider-box { background: #0f172a; padding: 16px; border-radius: 10px; border: 1px solid #334155; }
+  input[type=range] { width: 100%; accent-color: #38bdf8; cursor: pointer; height: 8px; border-radius: 4px; background: #334155; }
 </style>
 </head>
 <body>
@@ -570,6 +577,33 @@ HTML_DASHBOARD = """<!DOCTYPE html>
     <div class="card"><div class="card-label">Progress</div><div class="card-val"><span id="pct-val">0</span><span class="unit">%</span></div></div>
     <div class="card"><div class="card-label">Total Sips</div><div class="card-val"><span id="sips-val">0</span></div></div>
     <div class="card"><div class="card-label">Goal Target</div><div class="card-val"><span id="target-val">2500</span><span class="unit">mL</span></div></div>
+  </div>
+
+  <div class="card">
+    <h3 style="font-size: 1.1rem; margin-bottom: 12px;">➕ Log Drink Manually</h3>
+    
+    <div style="font-size: 0.75rem; color: #94a3b8; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Quick Log</div>
+    <div class="quick-buttons">
+      <button class="quick-btn" onclick="logSip(120)">☕ Small Cup<span class="subtext">120 mL</span></button>
+      <button class="quick-btn" onclick="logSip(200)">🥛 Large Cup<span class="subtext">200 mL</span></button>
+      <button class="quick-btn" onclick="logSip(310)">🍵 Mug<span class="subtext">310 mL</span></button>
+      <button class="quick-btn" onclick="logSip(700)">🚴 Bidon<span class="subtext">700 mL</span></button>
+    </div>
+
+    <div style="font-size: 0.75rem; color: #94a3b8; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Custom Amount</div>
+    <div class="slider-box">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <span style="color:#94a3b8; font-size:0.9rem;">Select Amount:</span>
+        <span style="font-size:1.4rem; font-weight:700; color:#38bdf8;"><span id="slider-val">250</span> <span style="font-size:0.9rem; color:#94a3b8;">mL</span></span>
+      </div>
+      <input type="range" id="custom-slider" min="50" max="1000" step="10" value="250" oninput="updateSliderText(this.value)">
+      <div style="display:flex; justify-content:space-between; font-size:0.75rem; color:#64748b; margin-top:6px;">
+        <span>50 mL</span>
+        <span>500 mL</span>
+        <span>1000 mL</span>
+      </div>
+      <button style="margin-top: 14px; width: 100%; background: #0284c7;" onclick="logCustomSip()">💧 Log Custom Drink</button>
+    </div>
   </div>
 
   <div class="card">
@@ -628,6 +662,31 @@ async function loadData() {
   } catch (e) {
     console.error("Fetch error", e);
   }
+}
+
+function updateSliderText(val) {
+  document.getElementById('slider-val').innerText = val;
+}
+
+async function logSip(ml) {
+  try {
+    const res = await fetch('./commands/intake', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ml: ml })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      loadData();
+    }
+  } catch (e) {
+    console.error("Log sip error", e);
+  }
+}
+
+async function logCustomSip() {
+  const val = parseInt(document.getElementById('custom-slider').value);
+  await logSip(val);
 }
 
 async function flashLED() {
@@ -719,11 +778,26 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
             cmd_queue.put_nowait((cmd_set_goal(ml), f"goal {ml}ml"))
             send_json(writer, 200, {"ok": True, "queued": f"goal {ml}ml"})
 
-        elif method == "POST" and path == "/commands/intake":
+        elif method == "POST" and path in ["/commands/intake", "/api/sips/manual"]:
             data = json.loads(body) if body else {}
             ml = int(data.get("ml", 0))
-            cmd_queue.put_nowait((cmd_sync_today_amount(ml), f"intake {ml}ml"))
-            send_json(writer, 200, {"ok": True, "queued": f"intake {ml}ml"})
+            if ml > 0:
+                db = init_db()
+                now_str = datetime.now().isoformat()
+                db.execute(
+                    "INSERT OR IGNORE INTO sips (timestamp, intake_ml, synced) VALUES (?, ?, 1)",
+                    (now_str, ml)
+                )
+                db.commit()
+                total_today = db.execute(
+                    "SELECT COALESCE(SUM(intake_ml), 0) FROM sips WHERE DATE(timestamp) = DATE('now')"
+                ).fetchone()[0]
+                publish_ha_sensor("today_intake", total_today, unit="mL", friendly_name="WaterH Today Intake", icon="mdi:cup-water", device_class="water", state_class="total_increasing")
+                if cmd_queue:
+                    cmd_queue.put_nowait((cmd_sync_today_amount(total_today), f"intake {total_today}ml"))
+                send_json(writer, 200, {"ok": True, "added_ml": ml, "today_total_ml": total_today})
+            else:
+                send_json(writer, 400, {"error": "invalid ml"})
 
         elif method == "POST" and path == "/commands/reminder":
             data = json.loads(body) if body else {}
