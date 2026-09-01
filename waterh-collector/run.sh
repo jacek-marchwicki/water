@@ -44,4 +44,12 @@ if [ -f "$SERVICES_PATH" ] && jq -e '.mqtt' "$SERVICES_PATH" >/dev/null 2>&1; th
 fi
 
 echo "[WaterH Add-on] Starting WaterH Collector for bottle: ${WATERH_ADDR}"
-exec python3 /app/collector/collector.py
+if [ -f "/addons/waterh-collector/collector/collector.py" ]; then
+    echo "[WaterH Add-on] Executing latest code from /addons/waterh-collector/collector/collector.py"
+    exec python3 /addons/waterh-collector/collector/collector.py
+elif [ -f "/addons/local/waterh_collector/collector/collector.py" ]; then
+    echo "[WaterH Add-on] Executing latest code from /addons/local/waterh_collector/collector/collector.py"
+    exec python3 /addons/local/waterh_collector/collector/collector.py
+else
+    exec python3 /app/collector/collector.py
+fi
