@@ -5,15 +5,32 @@ Receives sip data from the BLE collector, stores in SQLite, serves API.
 Deployed on Coolify at water.syl.rest.
 """
 
+from __future__ import annotations
+
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-import aiosqlite
-from fastapi import FastAPI, Header, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+try:
+    import aiosqlite
+    from fastapi import FastAPI, Header, HTTPException
+    from fastapi.middleware.cors import CORSMiddleware
+    from pydantic import BaseModel
+    HAS_SERVER_DEPS = True
+except ImportError:
+    aiosqlite = None
+    FastAPI = None
+    Header = lambda default=None: default
+    HTTPException = Exception
+    CORSMiddleware = None
+    HAS_SERVER_DEPS = False
+
+    class BaseModel:
+        def __init__(self, **kwargs):
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+
 
 WATERH_TZ = ZoneInfo(os.environ.get("WATERH_TZ", "America/New_York"))
 API_TOKEN = os.environ.get("WATERH_API_TOKEN", "changeme")
@@ -59,14 +76,30 @@ async def lifespan(app: FastAPI):
     await db.close()
 
 
-app = FastAPI(title="WaterH API", docs_url="/api/docs", lifespan=lifespan)
+if HAS_SERVER_DEPS:
+    app = FastAPI(title="WaterH API", docs_url="/api/docs", lifespan=lifespan)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["GET", "POST"],
+        allow_headers=["*"],
+    )
+else:
+    class DummyApp:
+        def get(self, *args, **kwargs):
+            def decorator(f):
+                return f
+            return decorator
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["GET", "POST"],
-    allow_headers=["*"],
-)
+        def post(self, *args, **kwargs):
+            def decorator(f):
+                return f
+            return decorator
+
+        def add_middleware(self, *args, **kwargs):
+            pass
+
+    app = DummyApp()
 
 
 # --- Auth ---
