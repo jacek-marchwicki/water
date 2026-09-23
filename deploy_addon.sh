@@ -30,9 +30,21 @@ tar -czf - -C "$SCRIPT_DIR/waterh-collector" . | ssh -p "${HA_PORT}" "${HA_HOST}
 echo "------------------------------------------"
 echo "✔ Copy completed successfully!"
 echo "------------------------------------------"
-echo "Next steps in Home Assistant:"
-echo " 1. Go to Settings -> Add-ons -> Add-on Store"
-echo " 2. Click top-right menu (⋮) -> 'Check for new add-ons'"
-echo " 3. Find 'WaterH Smart Bottle Collector' under Local Add-ons"
-echo " 4. Configure your bottle MAC address & click Start!"
+
+echo "--> Reloading Supervisor app store..."
+ssh -p "${HA_PORT}" "${HA_HOST}" "ha store reload || true"
+
+echo "--> Checking WaterH Collector app status..."
+INFO_JSON=$(ssh -p "${HA_PORT}" "${HA_HOST}" "ha apps info local_waterh_collector --raw-json 2>/dev/null || true")
+
+if echo "$INFO_JSON" | grep -q '"update_available":true'; then
+    echo "--> Update detected! Upgrading WaterH Collector..."
+    ssh -p "${HA_PORT}" "${HA_HOST}" "ha apps update local_waterh_collector"
+else
+    echo "--> Restarting WaterH Collector with latest code..."
+    ssh -p "${HA_PORT}" "${HA_HOST}" "ha apps restart local_waterh_collector"
+fi
+
+echo "------------------------------------------"
+echo "✔ App update and restart complete!"
 echo "=========================================="
