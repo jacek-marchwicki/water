@@ -53,6 +53,8 @@ frontend/           Dashboard SPA
   index.html
   Dockerfile        nginx serving static build
 
+tests/              Unit tests (mocked, no BLE hardware required)
+
 research/           Reverse engineering scripts
   scan.py           BLE device scanner
   enumerate.py      GATT service enumerator
@@ -102,7 +104,35 @@ docker build -t waterh-server server/
 docker run -p 8000:8000 -v waterh-data:/data waterh-server
 ```
 
+## Testing
+
+The unit test suite covers protocol command builders, packet parsing, SQLite database operations, Home Assistant MQTT discovery & commands, Direct REST API fallback, BlueZ cleanup, embedded HTTP server endpoints, and BLE synchronization cycles.
+
+All hardware interfaces (Bluetooth/Bleak, BlueZ, MQTT, HTTP) are mocked—no physical bottle or Bluetooth adapter is required to run tests.
+
+### Running Tests
+
+Using standard library `unittest` (no dependencies required):
+
+```bash
+python3 -m unittest discover tests
+```
+
+Using `pytest` (with coverage report):
+
+```bash
+pip install pytest pytest-asyncio pytest-cov
+pytest --cov=collector --cov-report=term-missing tests
+```
+
+### Common Testing Practices
+
+- **Hardware isolation:** Never communicate with real Bluetooth adapters or BlueZ subprocesses in unit tests. All BLE clients, scanners, subprocess calls, and sockets must be mocked.
+- **Database isolation:** All tests must inherit from `IsolatedCollectorTestCase` (`tests/base.py`), which allocates an isolated temporary SQLite database and restores global state upon completion.
+- **Dual test runner compatibility:** Tests should remain runnable under both `python3 -m unittest` and `pytest`.
+
 ## License
 
 MIT
+
 

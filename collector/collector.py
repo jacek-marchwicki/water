@@ -12,6 +12,8 @@ Replicates the official WaterH app's sync flow:
   7. Push new sips to remote API
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
@@ -24,7 +26,13 @@ import urllib.error
 from datetime import datetime
 from pathlib import Path
 
-from bleak import BleakClient, BleakScanner
+try:
+    from bleak import BleakClient, BleakScanner
+    HAS_BLEAK = True
+except ImportError:
+    BleakClient = None
+    BleakScanner = None
+    HAS_BLEAK = False
 
 try:
     import paho.mqtt.client as mqtt
@@ -1151,18 +1159,6 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
     finally:
         writer.close()
         await writer.wait_closed()
-
-
-def send_json(writer: asyncio.StreamWriter, status: int, data: dict):
-    body = json.dumps(data).encode()
-    status_text = {200: "OK", 400: "Bad Request", 404: "Not Found", 500: "Internal Server Error"}.get(status, "OK")
-    writer.write(
-        f"HTTP/1.1 {status} {status_text}\r\n"
-        f"Content-Type: application/json\r\n"
-        f"Content-Length: {len(body)}\r\n"
-        f"Access-Control-Allow-Origin: *\r\n"
-        f"\r\n".encode() + body
-    )
 
 
 def publish_ha_sensor(
