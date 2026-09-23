@@ -24,8 +24,8 @@ rm -rf "$SCRIPT_DIR/waterh-collector/frontend"
 cp -r "$SCRIPT_DIR/frontend" "$SCRIPT_DIR/waterh-collector/frontend"
 
 echo "--> Copying add-on files via tar stream over SSH..."
-ssh -p "${HA_PORT}" "${HA_HOST}" "mkdir -p '${DEST_DIR}'"
-tar -czf - -C "$SCRIPT_DIR/waterh-collector" . | ssh -p "${HA_PORT}" "${HA_HOST}" "tar -xzf - -C '${DEST_DIR}'"
+ssh -p "${HA_PORT}" "${HA_HOST}" "mkdir -p '${DEST_DIR}' /local_apps/waterh-collector"
+tar -czf - -C "$SCRIPT_DIR/waterh-collector" . | ssh -p "${HA_PORT}" "${HA_HOST}" "tar -xzf - -C '${DEST_DIR}' && cp -r '${DEST_DIR}/.' /local_apps/waterh-collector/"
 
 echo "------------------------------------------"
 echo "✔ Copy completed successfully!"
