@@ -192,6 +192,7 @@ class TestHttpServer(IsolatedCollectorTestCase):
         self.assertEqual(data["best_day_ml"], 1500)
         self.assertEqual(data["avg_daily_ml"], 1250)
         self.assertEqual(data["current_streak"], 2)
+        self.assertEqual(data["goal_ml"], 1800)
 
     def test_post_commands_flash(self):
         """Verify POST /commands/flash enqueues flash command."""
@@ -309,6 +310,23 @@ class TestHttpServer(IsolatedCollectorTestCase):
         self.assertFalse(col.cmd_queue.empty())
         cmd, label = col.cmd_queue.get_nowait()
         self.assertEqual(cmd, col.cmd_set_reminder(True, 7, 30, 22, 0, 45))
+
+    def test_post_commands_schedule(self):
+        """Verify POST /commands/schedule updates settings and enqueues sync_settings command."""
+        payload = {"wake": "08:30", "sleep": "21:30", "interval": 90, "on": True}
+        status_code, data, _ = self.run_async(self._send_request("POST", "/commands/schedule", body=payload))
+        self.assertEqual(status_code, 200)
+        self.assertTrue(data["ok"])
+        self.assertIn("schedule", data)
+        self.assertEqual(data["schedule"]["wake_time"], "08:30")
+        self.assertEqual(data["schedule"]["sleep_time"], "21:30")
+        self.assertEqual(data["schedule"]["interval_min"], 90)
+        self.assertTrue(data["schedule"]["reminder_on"])
+        self.assertEqual(data["queued"], "reminder on")
+
+        self.assertFalse(col.cmd_queue.empty())
+        cmd, label = col.cmd_queue.get_nowait()
+        self.assertIn("schedule update", label)
 
     def test_post_commands_calibrate(self):
         """Verify POST /commands/calibrate enqueues recalibrate command."""

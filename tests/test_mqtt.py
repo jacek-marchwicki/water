@@ -106,15 +106,20 @@ class TestHAConnection(IsolatedCollectorTestCase):
 
         conn.publish_discovery()
 
-        # Should publish configs for: today_intake, battery, temperature, tds, daily_goal, status, flash_led, recalibrate, led_mode, set_goal
-        self.assertEqual(conn.client.publish.call_count, 13)  # 10 configs + 3 baseline states
+        # Should publish configs for: today_intake, battery, temperature, tds, daily_goal, status, flash_led, recalibrate, sync_time, led_mode, set_goal, wake_time, sleep_time, reminder_interval, reminder
+        self.assertEqual(conn.client.publish.call_count, 22)  # 15 configs + 7 baseline states
 
         published_topics = [c[0][0] for c in conn.client.publish.call_args_list]
         self.assertIn("homeassistant/sensor/waterh/today_intake/config", published_topics)
         self.assertIn("homeassistant/sensor/waterh/battery/config", published_topics)
         self.assertIn("homeassistant/button/waterh/flash_led/config", published_topics)
+        self.assertIn("homeassistant/button/waterh/sync_time/config", published_topics)
         self.assertIn("homeassistant/select/waterh/led_mode/config", published_topics)
         self.assertIn("homeassistant/number/waterh/set_goal/config", published_topics)
+        self.assertIn("homeassistant/time/waterh/wake_time/config", published_topics)
+        self.assertIn("homeassistant/time/waterh/sleep_time/config", published_topics)
+        self.assertIn("homeassistant/number/waterh/reminder_interval/config", published_topics)
+        self.assertIn("homeassistant/switch/waterh/reminder/config", published_topics)
 
     def test_on_message_flash(self):
         """Verify MQTT flash command enqueues flash command."""

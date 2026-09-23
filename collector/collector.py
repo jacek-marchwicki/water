@@ -1010,7 +1010,9 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
         elif method == "GET" and (path.startswith("/api/data") or path == "/api/data"):
             db = init_db()
             total_today = get_today_total(db)
-            rows = get_today_sips(db, limit=50)
+            rows = db.execute(
+                "SELECT id, timestamp, intake_ml, temp_c, tds FROM sips ORDER BY timestamp DESC LIMIT 50"
+            ).fetchall()
             sips = [{"id": r[0], "timestamp": r[1], "intake_ml": r[2], "temp_c": r[3], "tds": r[4]} for r in rows]
             resp = {
                 "bottle": BOTTLE_ADDR,
@@ -1032,6 +1034,7 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
                 "POST /commands/led       {mode, color}",
                 "POST /commands/goal      {ml}",
                 "POST /commands/schedule  {wake, sleep, interval, on}",
+                "POST /commands/reminder  {on, wake, sleep, interval}",
                 "POST /commands/time",
                 "POST /commands/intake    {ml}",
                 "POST /commands/calibrate {full}",
@@ -1098,7 +1101,31 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
                 cmd_queue.put_nowait((cmd_sync_today_amount(total_today), f"sync-display {total_today}ml"))
             send_json(writer, 200, {"ok": True, "today_total_ml": total_today})
 
-        elif method == "POST" and path in ["/commands/schedule", "/commands/reminder"]:
+        elif method == "POST" and path == "/commands/reminder":
+            data = json.loads(body) if body else {}
+            on = data.get("on", False)
+            wake = data.get("wake", "08:00")
+            slp = data.get("sleep", "20:00")
+            interval = int(data.get("interval", 60))
+            wake_parts = wake.split(":")
+            slp_parts = slp.split(":")
+            wake_h = int(wake_parts[0])
+            wake_m = int(wake_parts[1]) if len(wake_parts) > 1 else 0
+            sleep_h = int(slp_parts[0])
+            sleep_m = int(slp_parts[1]) if len(slp_parts) > 1 else 0
+            set_schedule_settings(
+                wake_time=f"{wake_h:02d}:{wake_m:02d}",
+                sleep_time=f"{sleep_h:02d}:{sleep_m:02d}",
+                interval_min=interval,
+                reminder_on=on
+            )
+            cmd = cmd_set_reminder(on, wake_h, wake_m, sleep_h, sleep_m, interval)
+            label = f"reminder {'on' if on else 'off'}"
+            if cmd_queue:
+                cmd_queue.put_nowait((cmd, label))
+            send_json(writer, 200, {"ok": True, "queued": label})
+
+        elif method == "POST" and path == "/commands/schedule":
             data = json.loads(body) if body else {}
             wake = data.get("wake") or data.get("wake_time")
             sleep = data.get("sleep") or data.get("sleep_time")
@@ -1115,12 +1142,13 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
                 interval_min=interval,
                 reminder_on=on
             )
+            label = f"reminder {'on' if sched['reminder_on'] else 'off'}"
             if cmd_queue:
                 cmd_queue.put_nowait((
                     cmd_sync_settings(),
                     f"schedule update (wake={sched['wake_time']}, sleep={sched['sleep_time']}, int={sched['interval_min']}m, on={sched['reminder_on']})"
                 ))
-            send_json(writer, 200, {"ok": True, "schedule": sched})
+            send_json(writer, 200, {"ok": True, "schedule": sched, "queued": label})
 
         elif method == "POST" and path in ["/commands/time", "/commands/sync_time"]:
             now = get_local_now()
@@ -1523,7 +1551,7 @@ async def sync_cycle(client, queue: asyncio.Queue, db) -> bool:
 # --- BLE main loop ---
 
 async def ble_loop():
-    global cmd_queue, ha_conn
+    global cmd_queue, ha_conn, WRITE_CHAR, NOTIFY_CHAR
     cmd_queue = asyncio.Queue()
     loop = asyncio.get_running_loop()
 

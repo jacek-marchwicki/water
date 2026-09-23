@@ -52,7 +52,7 @@ class TestBLEHelpers(IsolatedCollectorTestCase):
         mock_client = MagicMock()
         mock_client.services = [mock_service]
 
-        col.resolve_gatt_characteristics(mock_client)
+        self.run_async(col.resolve_gatt_characteristics(mock_client))
 
         self.assertEqual(col.WRITE_CHAR, "0000ffe9-0000-1000-8000-00805f9b34fb")
         self.assertEqual(col.NOTIFY_CHAR, "0000ffe4-0000-1000-8000-00805f9b34fb")
@@ -64,7 +64,7 @@ class TestBLEHelpers(IsolatedCollectorTestCase):
 
         col.WRITE_CHAR = "default_write"
         col.NOTIFY_CHAR = "default_notify"
-        col.resolve_gatt_characteristics(mock_client)
+        self.run_async(col.resolve_gatt_characteristics(mock_client))
 
         self.assertEqual(col.WRITE_CHAR, "default_write")
         self.assertEqual(col.NOTIFY_CHAR, "default_notify")
