@@ -5,9 +5,6 @@ configuration:
   poll_interval:
     name: "Poll Interval (seconds)"
     description: "Polling interval in seconds between Bluetooth sync cycles."
-  goal_ml:
-    name: "Daily Intake Goal (mL)"
-    description: "Target daily water intake goal in mL."
   mqtt_host:
     name: "MQTT Host"
     description: "Hostname or IP of your Mosquitto MQTT broker."

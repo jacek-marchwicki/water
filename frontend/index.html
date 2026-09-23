@@ -49,6 +49,23 @@
             <div class="stat-value"><span id="today-pct">0</span><span class="unit">%</span></div>
           </div>
         </div>
+
+        <div class="card goal-card" style="margin-bottom: 20px;">
+          <h3 style="font-size: 1rem; margin-bottom: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">🎯 Daily Hydration Goal</h3>
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+            <div style="font-size:1.1rem; font-weight:700; color:#38bdf8;">
+              <span id="display-goal">1800</span> <span style="font-size:0.85rem; color:#94a3b8;">mL</span>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button class="quick-btn" style="padding: 6px 12px; font-size: 0.8rem;" onclick="setGoal(1500)">1500 mL</button>
+              <button class="quick-btn" style="padding: 6px 12px; font-size: 0.8rem;" onclick="setGoal(1800)">1800 mL</button>
+              <button class="quick-btn" style="padding: 6px 12px; font-size: 0.8rem;" onclick="setGoal(2000)">2000 mL</button>
+              <button class="quick-btn" style="padding: 6px 12px; font-size: 0.8rem;" onclick="setGoal(2500)">2500 mL</button>
+              <button class="action-btn" style="padding: 6px 14px; font-size: 0.8rem;" onclick="promptCustomGoal()">✏️ Custom</button>
+            </div>
+          </div>
+        </div>
+
         <div class="card manual-card" style="margin-bottom: 20px;">
           <h3 style="font-size: 1rem; margin-bottom: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">➕ Log Drink Manually</h3>
           

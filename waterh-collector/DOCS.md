@@ -41,7 +41,6 @@ You can easily locate your WaterH bottle's Bluetooth MAC address:
 |---|---|---|---|
 | `bottle_address` | String | `A4:C1:38:F3:63:2D` | Bluetooth MAC Address of your WaterH bottle (found at bottom of screen in WaterH app). |
 | `poll_interval` | Integer | `60` | Polling interval in seconds between sync cycles. |
-| `goal_ml` | Integer | `2500` | Target daily intake in mL. |
 | `mqtt_host` | String | `core-mosquitto` | Address of your MQTT broker (`core-mosquitto` for built-in HA broker). |
 | `mqtt_port` | Integer | `1883` | MQTT port. |
 | `mqtt_user` | String | `""` | MQTT username (auto-provisioned by Home Assistant if left blank). |

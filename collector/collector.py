@@ -44,7 +44,7 @@ BOTTLE_ADDR = os.environ.get("WATERH_ADDR", "A4:C1:38:32:D7:DE")
 NOTIFY_CHAR = "0000ffe4-0000-1000-8000-00805f9b34fb"
 WRITE_CHAR = "0000ffe9-0000-1000-8000-00805f9b34fb"
 POLL_INTERVAL = int(os.environ.get("WATERH_POLL_INTERVAL", "60"))
-GOAL_ML = int(os.environ.get("WATERH_GOAL_ML", "2500"))
+GOAL_ML = 1800
 API_URL = os.environ.get("WATERH_API_URL", "https://water.syl.rest/api/ingest")
 HEARTBEAT_URL = os.environ.get("WATERH_HEARTBEAT_URL", "https://water.syl.rest/api/heartbeat")
 API_TOKEN = os.environ.get("WATERH_API_TOKEN", "")
@@ -235,12 +235,12 @@ class HAConnection:
                 self.publish_state("select/led_mode", payload)
         elif topic == "waterh/cmd/set_goal":
             try:
-                ml = int(payload)
+                ml = int(float(payload))
+                set_goal_ml(ml)
                 if self.cmd_queue and self.loop:
                     self.loop.call_soon_threadsafe(
                         self.cmd_queue.put_nowait, (cmd_set_goal(ml), f"goal {ml}ml (MQTT)")
                     )
-                    self.publish_state("sensor/daily_goal", ml)
             except ValueError:
                 pass
         elif topic == "waterh/cmd/recalibrate":
@@ -603,6 +603,7 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
             last_temp = rows[0][3] if rows and rows[0][3] else None
             resp = {
                 "total_ml": total_today,
+                "goal_ml": GOAL_ML,
                 "goal_pct": round((total_today / GOAL_ML) * 100) if GOAL_ML else 0,
                 "sip_count": len(rows),
                 "last_temp_c": last_temp,
@@ -685,8 +686,10 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
         elif method == "POST" and path == "/commands/goal":
             data = json.loads(body) if body else {}
             ml = int(data.get("ml", GOAL_ML))
-            cmd_queue.put_nowait((cmd_set_goal(ml), f"goal {ml}ml"))
-            send_json(writer, 200, {"ok": True, "queued": f"goal {ml}ml"})
+            set_goal_ml(ml)
+            if cmd_queue:
+                cmd_queue.put_nowait((cmd_set_goal(ml), f"goal {ml}ml"))
+            send_json(writer, 200, {"ok": True, "goal_ml": GOAL_ML, "queued": f"goal {ml}ml"})
 
         elif method == "POST" and path in ["/commands/intake", "/api/sips/manual"]:
             data = json.loads(body) if body else {}
@@ -881,8 +884,39 @@ def init_db():
             acked_bytes INTEGER
         )
     """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+    """)
     db.commit()
     return db
+
+
+def get_goal_ml() -> int:
+    try:
+        db = init_db()
+        row = db.execute("SELECT value FROM settings WHERE key = 'goal_ml'").fetchone()
+        if row and row[0]:
+            return int(row[0])
+    except Exception:
+        pass
+    return 1800
+
+
+def set_goal_ml(ml: int):
+    global GOAL_ML
+    GOAL_ML = ml
+    try:
+        db = init_db()
+        db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('goal_ml', ?)", (str(ml),))
+        db.commit()
+    except Exception as e:
+        log.error(f"[DB] Error saving goal: {e}")
+    publish_ha_sensor("daily_goal", GOAL_ML, unit="mL", friendly_name="WaterH Daily Goal", icon="mdi:target-variant")
+    if ha_conn:
+        ha_conn.publish_state("sensor/daily_goal", GOAL_ML)
 
 
 def store_sips(db, sips):
@@ -1299,9 +1333,11 @@ async def ble_loop():
 
 
 def main():
+    global GOAL_ML
+    GOAL_ML = get_goal_ml()
     log.info("[INIT] WaterH Collector (full protocol)")
     log.info(f"[INIT] Bottle: {BOTTLE_ADDR}")
-    log.info(f"[INIT] Goal: {GOAL_ML}ml")
+    log.info(f"[INIT] Goal: {GOAL_ML}ml (from database)")
     log.info(f"[INIT] Poll interval: {POLL_INTERVAL}s")
     log.info(f"[INIT] API: {API_URL}")
     log.info(f"[INIT] Command server: :{CMD_PORT}")

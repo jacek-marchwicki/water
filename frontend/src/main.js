@@ -118,6 +118,9 @@ async function loadToday() {
     }
 
     document.getElementById("today-bar").style.width = `${data.goal_pct}%`;
+    if (document.getElementById("display-goal") && data.goal_ml) {
+      document.getElementById("display-goal").innerText = data.goal_ml;
+    }
 
     const tbody = document.getElementById("sip-table");
     const sipKey = data.sips.map((s) => s.timestamp).join(",");
@@ -386,4 +389,28 @@ window.flashLED = async function() {
 window.setLED = async function() {
   const mode = document.getElementById("led-select").value;
   await fetch("./commands/led", { method: "POST", body: JSON.stringify({ mode: mode, color: "blue" }) });
+};
+
+window.setGoal = async function(ml) {
+  try {
+    const res = await fetch("./commands/goal", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ml: ml })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      loadToday();
+    }
+  } catch (e) {
+    console.error("Set goal error", e);
+  }
+};
+
+window.promptCustomGoal = async function() {
+  const curr = document.getElementById("display-goal")?.innerText || "1800";
+  const val = prompt("Enter daily hydration goal in mL:", curr);
+  if (val && !isNaN(val) && parseInt(val) > 0) {
+    await window.setGoal(parseInt(val));
+  }
 };

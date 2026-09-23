@@ -7,7 +7,6 @@ if [ -f "$CONFIG_PATH" ]; then
     echo "[WaterH Add-on] Loading options from /data/options.json"
     export WATERH_ADDR=$(jq -r '.bottle_address // "A4:C1:38:32:D7:DE"' $CONFIG_PATH)
     export WATERH_POLL_INTERVAL=$(jq -r '.poll_interval // 60' $CONFIG_PATH)
-    export WATERH_GOAL_ML=$(jq -r '.goal_ml // 2500' $CONFIG_PATH)
     export WATERH_DB_PATH="/data/waterh.db"
     export MQTT_HOST=$(jq -r '.mqtt_host // "core-mosquitto"' $CONFIG_PATH)
     export MQTT_PORT=$(jq -r '.mqtt_port // 1883' $CONFIG_PATH)
