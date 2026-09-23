@@ -10,33 +10,19 @@ from __future__ import annotations
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 from zoneinfo import ZoneInfo
 
-try:
-    import aiosqlite
-    from fastapi import FastAPI, Header, HTTPException
-    from fastapi.middleware.cors import CORSMiddleware
-    from pydantic import BaseModel
-    HAS_SERVER_DEPS = True
-except ImportError:
-    aiosqlite = None
-    FastAPI = None
-    Header = lambda default=None: default
-    HTTPException = Exception
-    CORSMiddleware = None
-    HAS_SERVER_DEPS = False
-
-    class BaseModel:
-        def __init__(self, **kwargs):
-            for k, v in kwargs.items():
-                setattr(self, k, v)
-
+import aiosqlite
+from fastapi import FastAPI, Header, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 WATERH_TZ = ZoneInfo(os.environ.get("WATERH_TZ", "America/New_York"))
 API_TOKEN = os.environ.get("WATERH_API_TOKEN", "changeme")
 DB_PATH = os.environ.get("WATERH_DB_PATH", "/data/waterh.db")
 
-db: aiosqlite.Connection | None = None
+db: Optional[aiosqlite.Connection] = None
 
 
 @asynccontextmanager
@@ -76,30 +62,14 @@ async def lifespan(app: FastAPI):
     await db.close()
 
 
-if HAS_SERVER_DEPS:
-    app = FastAPI(title="WaterH API", docs_url="/api/docs", lifespan=lifespan)
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_methods=["GET", "POST"],
-        allow_headers=["*"],
-    )
-else:
-    class DummyApp:
-        def get(self, *args, **kwargs):
-            def decorator(f):
-                return f
-            return decorator
+app = FastAPI(title="WaterH API", docs_url="/api/docs", lifespan=lifespan)
 
-        def post(self, *args, **kwargs):
-            def decorator(f):
-                return f
-            return decorator
-
-        def add_middleware(self, *args, **kwargs):
-            pass
-
-    app = DummyApp()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
 
 
 # --- Auth ---
@@ -112,12 +82,12 @@ def verify_token(authorization: str = Header(None)):
 # --- Models ---
 
 class Sip(BaseModel):
-    id: int | None = None
+    id: Optional[int] = None
     timestamp: str
     intake_ml: int
-    temp_c: float | None = None
-    unknown: int | None = None
-    raw_hex: str | None = None
+    temp_c: Optional[float] = None
+    unknown: Optional[int] = None
+    raw_hex: Optional[str] = None
 
 
 class IngestPayload(BaseModel):
@@ -246,7 +216,7 @@ async def set_goal(payload: GoalPayload):
 
 
 @app.get("/api/sips")
-async def sips(date_filter: str | None = None, limit: int = 100, offset: int = 0):
+async def sips(date_filter: Optional[str] = None, limit: int = 100, offset: int = 0):
     limit = min(limit, 500)
     if date_filter:
         rows = await (await db.execute(

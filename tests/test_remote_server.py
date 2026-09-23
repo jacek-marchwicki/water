@@ -1,53 +1,26 @@
 """
-Unit tests for server.py covering dynamic goal configuration, settings persistence,
-and goal reporting across /api/today, /api/history, /api/widget, and /commands/goal.
+Unit tests for server.py using FastAPI TestClient and real aiosqlite.
+Tests dynamic goal configuration, settings persistence, and goal reporting
+across /api/today, /api/history, /api/widget, /commands/goal, and /api/goal.
 """
 from __future__ import annotations
 
 import asyncio
 import os
 import shutil
-import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import aiosqlite
+from fastapi.testclient import TestClient
+
 import server.server as srv
 
 
-class AsyncCursorWrapper:
-    """Wraps a standard sqlite3.Cursor in an async interface matching aiosqlite."""
-
-    def __init__(self, cursor: sqlite3.Cursor):
-        self._cursor = cursor
-
-    async def fetchone(self):
-        return self._cursor.fetchone()
-
-    async def fetchall(self):
-        return self._cursor.fetchall()
-
-
-class AsyncDbWrapper:
-    """Wraps a standard sqlite3.Connection in an async interface matching aiosqlite."""
-
-    def __init__(self, conn: sqlite3.Connection):
-        self._conn = conn
-
-    async def execute(self, sql: str, params: tuple | list = ()):
-        cursor = self._conn.execute(sql, params)
-        return AsyncCursorWrapper(cursor)
-
-    async def commit(self):
-        self._conn.commit()
-
-    async def close(self):
-        self._conn.close()
-
-
 class IsolatedServerTestCase(unittest.TestCase):
-    """Provides an isolated database and async loop for testing server.py endpoints."""
+    """Provides an isolated temporary aiosqlite database and TestClient for server.py."""
 
     def setUp(self):
         super().setUp()
@@ -55,10 +28,16 @@ class IsolatedServerTestCase(unittest.TestCase):
         self.temp_dir = tempfile.mkdtemp(prefix="waterh_srv_test_")
         self.db_path = Path(self.temp_dir) / "test_server.db"
 
-        # Initialize SQLite database with server.py tables
-        self.raw_db = sqlite3.connect(str(self.db_path))
-        self.raw_db.row_factory = sqlite3.Row
-        self.raw_db.execute("""
+        # Save previous globals
+        self._orig_db = srv.db
+        self._orig_db_path = srv.DB_PATH
+
+        # Initialize aiosqlite database connection with server schema
+        srv.DB_PATH = str(self.db_path)
+        srv.db = self.loop.run_until_complete(aiosqlite.connect(str(self.db_path)))
+        srv.db.row_factory = aiosqlite.Row
+
+        self.run_async(srv.db.execute("""
             CREATE TABLE IF NOT EXISTS sips (
                 id INTEGER PRIMARY KEY,
                 timestamp TEXT UNIQUE NOT NULL,
@@ -68,9 +47,9 @@ class IsolatedServerTestCase(unittest.TestCase):
                 raw_hex TEXT,
                 created_at TEXT DEFAULT (datetime('now'))
             )
-        """)
-        self.raw_db.execute("CREATE INDEX IF NOT EXISTS idx_sips_date ON sips (DATE(timestamp))")
-        self.raw_db.execute("""
+        """))
+        self.run_async(srv.db.execute("CREATE INDEX IF NOT EXISTS idx_sips_date ON sips (DATE(timestamp))"))
+        self.run_async(srv.db.execute("""
             CREATE TABLE IF NOT EXISTS heartbeats (
                 id INTEGER PRIMARY KEY,
                 state TEXT NOT NULL,
@@ -78,26 +57,20 @@ class IsolatedServerTestCase(unittest.TestCase):
                 collector_ts TEXT,
                 received_at TEXT DEFAULT (datetime('now'))
             )
-        """)
-        self.raw_db.execute("""
+        """))
+        self.run_async(srv.db.execute("""
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             )
-        """)
-        self.raw_db.commit()
+        """))
+        self.run_async(srv.db.commit())
 
-        # Save previous globals
-        self._orig_db = srv.db
-        self._orig_db_path = srv.DB_PATH
-
-        # Assign async-wrapped connection
-        self.async_db = AsyncDbWrapper(self.raw_db)
-        srv.db = self.async_db
-        srv.DB_PATH = str(self.db_path)
+        # TestClient for HTTP requests
+        self.client = TestClient(srv.app)
 
     def tearDown(self):
-        self.raw_db.close()
+        self.run_async(srv.db.close())
         srv.db = self._orig_db
         srv.DB_PATH = self._orig_db_path
         self.loop.close()
@@ -112,7 +85,7 @@ class IsolatedServerTestCase(unittest.TestCase):
 class TestServerGoalAndEndpoints(IsolatedServerTestCase):
 
     def test_get_goal_ml_default_when_no_setting(self):
-        """Verify get_goal_ml returns default 1800 when no setting and no env var."""
+        """Verify get_goal_ml returns default 1800 when no setting in DB and no env var."""
         with patch.dict(os.environ, {}, clear=False):
             if "WATERH_GOAL_ML" in os.environ:
                 del os.environ["WATERH_GOAL_ML"]
@@ -127,58 +100,56 @@ class TestServerGoalAndEndpoints(IsolatedServerTestCase):
 
     def test_get_goal_ml_from_database_settings(self):
         """Verify get_goal_ml retrieves goal stored in SQLite settings table."""
-        self.raw_db.execute("INSERT INTO settings (key, value) VALUES ('goal_ml', '2400')")
-        self.raw_db.commit()
+        self.run_async(srv.db.execute("INSERT INTO settings (key, value) VALUES ('goal_ml', '2400')"))
+        self.run_async(srv.db.commit())
 
         # Should prefer DB setting over env var
         with patch.dict(os.environ, {"WATERH_GOAL_ML": "1500"}):
             goal = self.run_async(srv.get_goal_ml())
             self.assertEqual(goal, 2400)
 
-    def test_set_goal_updates_database(self):
-        """Verify set_goal endpoint persists new goal to settings table and returns ok."""
-        payload = srv.GoalPayload(ml=2250)
-        res = self.run_async(srv.set_goal(payload))
+    def test_post_commands_goal_endpoint(self):
+        """Verify POST /commands/goal persists new goal and returns ok status."""
+        resp = self.client.post("/commands/goal", json={"ml": 2250})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"ok": True, "goal_ml": 2250})
 
-        self.assertEqual(res, {"ok": True, "goal_ml": 2250})
-
-        row = self.raw_db.execute("SELECT value FROM settings WHERE key = 'goal_ml'").fetchone()
+        # Verify persisted in database
+        row = self.run_async((self.run_async(srv.db.execute("SELECT value FROM settings WHERE key = 'goal_ml'"))).fetchone())
         self.assertIsNotNone(row)
         self.assertEqual(row["value"], "2250")
 
-        # Calling get_goal_ml afterwards returns the updated value
+        # Verify get_goal_ml returns 2250
         goal = self.run_async(srv.get_goal_ml())
         self.assertEqual(goal, 2250)
 
-    def test_set_goal_overwrites_existing_goal(self):
-        """Verify set_goal replaces previously stored goal in settings table."""
-        self.raw_db.execute("INSERT INTO settings (key, value) VALUES ('goal_ml', '1800')")
-        self.raw_db.commit()
+    def test_post_api_goal_endpoint(self):
+        """Verify POST /api/goal also updates and persists the daily goal."""
+        resp = self.client.post("/api/goal", json={"ml": 2700})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"ok": True, "goal_ml": 2700})
 
-        payload = srv.GoalPayload(ml=3000)
-        res = self.run_async(srv.set_goal(payload))
-        self.assertEqual(res["goal_ml"], 3000)
-
-        row = self.raw_db.execute("SELECT value FROM settings WHERE key = 'goal_ml'").fetchone()
-        self.assertEqual(row["value"], "3000")
+        row = self.run_async((self.run_async(srv.db.execute("SELECT value FROM settings WHERE key = 'goal_ml'"))).fetchone())
+        self.assertEqual(row["value"], "2700")
 
     def test_today_endpoint_uses_dynamic_goal(self):
-        """Verify /api/today uses dynamic goal_ml and calculates goal_pct accurately."""
-        # Insert 2 sips for today
+        """Verify GET /api/today uses dynamic goal_ml and calculates goal_pct accurately."""
         today_date = srv.datetime.now(srv.WATERH_TZ).date().isoformat()
-        self.raw_db.execute(
+        self.run_async(srv.db.execute(
             "INSERT INTO sips (timestamp, intake_ml, temp_c) VALUES (?, 200, 22.5)",
             (f"{today_date}T09:00:00",)
-        )
-        self.raw_db.execute(
+        ))
+        self.run_async(srv.db.execute(
             "INSERT INTO sips (timestamp, intake_ml, temp_c) VALUES (?, 300, 23.0)",
             (f"{today_date}T11:00:00",)
-        )
+        ))
         # Store goal 2000 in DB
-        self.raw_db.execute("INSERT INTO settings (key, value) VALUES ('goal_ml', '2000')")
-        self.raw_db.commit()
+        self.run_async(srv.db.execute("INSERT INTO settings (key, value) VALUES ('goal_ml', '2000')"))
+        self.run_async(srv.db.commit())
 
-        data = self.run_async(srv.today())
+        resp = self.client.get("/api/today")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
 
         self.assertEqual(data["total_ml"], 500)
         self.assertEqual(data["goal_ml"], 2000)
@@ -187,28 +158,33 @@ class TestServerGoalAndEndpoints(IsolatedServerTestCase):
         self.assertEqual(data["last_temp_c"], 23.0)
 
     def test_today_endpoint_goal_pct_capped_at_100(self):
-        """Verify /api/today caps goal_pct at 100% when intake exceeds goal."""
+        """Verify GET /api/today caps goal_pct at 100% when intake exceeds goal."""
         today_date = srv.datetime.now(srv.WATERH_TZ).date().isoformat()
-        self.raw_db.execute(
+        self.run_async(srv.db.execute(
             "INSERT INTO sips (timestamp, intake_ml, temp_c) VALUES (?, 2500, 21.0)",
             (f"{today_date}T10:00:00",)
-        )
-        self.raw_db.execute("INSERT INTO settings (key, value) VALUES ('goal_ml', '1800')")
-        self.raw_db.commit()
+        ))
+        self.run_async(srv.db.execute("INSERT INTO settings (key, value) VALUES ('goal_ml', '1800')"))
+        self.run_async(srv.db.commit())
 
-        data = self.run_async(srv.today())
+        resp = self.client.get("/api/today")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+
         self.assertEqual(data["total_ml"], 2500)
         self.assertEqual(data["goal_ml"], 1800)
         self.assertEqual(data["goal_pct"], 100)
 
     def test_history_endpoint_includes_goal_ml(self):
-        """Verify /api/history returns goal_ml matching the active database goal."""
-        self.raw_db.execute("INSERT INTO settings (key, value) VALUES ('goal_ml', '2200')")
-        self.raw_db.execute("INSERT INTO sips (timestamp, intake_ml, temp_c) VALUES ('2026-09-20T10:00:00', 1200, 20.0)")
-        self.raw_db.execute("INSERT INTO sips (timestamp, intake_ml, temp_c) VALUES ('2026-09-21T10:00:00', 1600, 21.0)")
-        self.raw_db.commit()
+        """Verify GET /api/history returns goal_ml matching the active database goal."""
+        self.run_async(srv.db.execute("INSERT INTO settings (key, value) VALUES ('goal_ml', '2200')"))
+        self.run_async(srv.db.execute("INSERT INTO sips (timestamp, intake_ml, temp_c) VALUES ('2026-09-20T10:00:00', 1200, 20.0)"))
+        self.run_async(srv.db.execute("INSERT INTO sips (timestamp, intake_ml, temp_c) VALUES ('2026-09-21T10:00:00', 1600, 21.0)"))
+        self.run_async(srv.db.commit())
 
-        data = self.run_async(srv.history(days=7))
+        resp = self.client.get("/api/history?days=7")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
 
         self.assertIn("goal_ml", data)
         self.assertEqual(data["goal_ml"], 2200)
@@ -218,21 +194,35 @@ class TestServerGoalAndEndpoints(IsolatedServerTestCase):
         self.assertEqual(data["current_streak"], 2)
 
     def test_widget_endpoint_reflects_dynamic_goal(self):
-        """Verify /api/widget delegates to today() and includes correct goal_pct."""
+        """Verify GET /api/widget delegates to today() and includes correct goal_pct."""
         today_date = srv.datetime.now(srv.WATERH_TZ).date().isoformat()
-        self.raw_db.execute(
+        self.run_async(srv.db.execute(
             "INSERT INTO sips (timestamp, intake_ml, temp_c) VALUES (?, 900, 22.0)",
             (f"{today_date}T08:00:00",)
-        )
-        self.raw_db.execute("INSERT INTO settings (key, value) VALUES ('goal_ml', '1800')")
-        self.raw_db.commit()
+        ))
+        self.run_async(srv.db.execute("INSERT INTO settings (key, value) VALUES ('goal_ml', '1800')"))
+        self.run_async(srv.db.commit())
 
-        widget_data = self.run_async(srv.widget())
+        resp = self.client.get("/api/widget")
+        self.assertEqual(resp.status_code, 200)
+        widget_data = resp.json()
 
         self.assertEqual(widget_data["today_ml"], 900)
         self.assertEqual(widget_data["goal_pct"], 50)
         self.assertEqual(widget_data["sip_count"], 1)
         self.assertEqual(widget_data["last_temp_c"], 22.0)
+
+    def test_lifespan_creates_settings_table(self):
+        """Verify lifespan context manager creates settings table in newly initialized database."""
+        async def run_lifespan():
+            temp_db = Path(self.temp_dir) / "lifespan_test.db"
+            with patch("server.server.DB_PATH", str(temp_db)):
+                async with srv.lifespan(srv.app):
+                    row = await (await srv.db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='settings'")).fetchone()
+                    self.assertIsNotNone(row)
+                    self.assertEqual(row["name"], "settings")
+
+        self.run_async(run_lifespan())
 
 
 if __name__ == "__main__":
