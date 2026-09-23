@@ -39,8 +39,11 @@ Run the tool using `python3 send_cmd.py <subcommand> [options]`.
 | `led` | `[mode] [color]` | Set LED animation mode and color | `python3 send_cmd.py led rainbow blue` |
 | `intake` | `<ml>` | Sync water intake volume to bottle OLED display | `python3 send_cmd.py intake 500` |
 | `goal` | `<ml>` | Set daily target goal in mL | `python3 send_cmd.py goal 2500` |
+| `schedule` | `[--wake] [--sleep] [--interval] [--on/--off]` | View or update active waking hours and reminder schedule | `python3 send_cmd.py schedule --wake 08:00 --sleep 22:00 --interval 45 --on` |
+| `time` | *(none)* | Sync bottle clock to local timezone and system time | `python3 send_cmd.py time` |
 | `raw` | `<hex bytes>` | Send arbitrary hex bytes sequence over BLE | `python3 send_cmd.py raw 50 54 00 03 02 1d 01` |
 | `interactive` | *(none)* | Launch interactive console menu | `python3 send_cmd.py interactive` |
+
 
 ---
 
@@ -84,7 +87,23 @@ python3 send_cmd.py goal 2500
 python3 send_cmd.py intake 750
 ```
 
-### 4. Sending Raw Hex Commands (Protocol Research)
+### 4. Active Day Hours, Reminders & Timezone Sync
+To view or adjust your daily wake/sleep window and hydration reminders:
+```bash
+# Check current schedule and bottle local clock
+python3 send_cmd.py schedule
+
+# Update wake and sleep hours with 45m reminder interval
+python3 send_cmd.py schedule --wake 08:00 --sleep 22:00 --interval 45 --on
+
+# Disable periodic reminders
+python3 send_cmd.py schedule --off
+
+# Sync current local system time to bottle clock
+python3 send_cmd.py time
+```
+
+### 5. Sending Raw Hex Commands (Protocol Research)
 To test newly discovered packet structures or raw byte sequences:
 ```bash
 # Example: Send raw LED flash packet (50540003021d01)
@@ -93,6 +112,7 @@ python3 send_cmd.py raw 50 54 00 03 02 1d 01
 # Example: Request bottle data / battery (47540001ff)
 python3 send_cmd.py raw 47 54 00 01 ff
 ```
+
 
 ---
 

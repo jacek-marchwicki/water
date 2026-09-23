@@ -84,6 +84,7 @@ async function loadToday() {
     const status = await statusRes.json();
 
     hideSkeleton();
+    if (!scheduleLoaded) loadSchedule();
 
     const el = document.getElementById("status");
     if (status.state === "connected") {
@@ -412,5 +413,90 @@ window.promptCustomGoal = async function() {
   const val = prompt("Enter daily hydration goal in mL:", curr);
   if (val && !isNaN(val) && parseInt(val) > 0) {
     await window.setGoal(parseInt(val));
+  }
+};
+
+// --- Active Day Schedule & Reminders ---
+let scheduleLoaded = false;
+
+window.updateToggleText = function(checked) {
+  const lbl = document.getElementById("sched-toggle-label");
+  if (lbl) {
+    lbl.textContent = checked ? "Reminders On" : "Reminders Off";
+    lbl.style.color = checked ? "var(--accent)" : "var(--text-dim)";
+  }
+};
+
+async function loadSchedule() {
+  try {
+    const res = await fetch("./api/schedule");
+    if (!res.ok) return;
+    const data = await res.json();
+    scheduleLoaded = true;
+
+    const wakeInput = document.getElementById("sched-wake-input");
+    const sleepInput = document.getElementById("sched-sleep-input");
+    const intervalSelect = document.getElementById("sched-interval-select");
+    const toggle = document.getElementById("sched-reminder-toggle");
+
+    if (wakeInput && data.wake_time) wakeInput.value = data.wake_time;
+    if (sleepInput && data.sleep_time) sleepInput.value = data.sleep_time;
+    if (intervalSelect && data.interval_min) intervalSelect.value = String(data.interval_min);
+    if (toggle) {
+      toggle.checked = Boolean(data.reminder_on);
+      window.updateToggleText(toggle.checked);
+    }
+  } catch (e) {
+    console.error("Failed to load schedule:", e);
+  }
+}
+
+function showScheduleFeedback(text, isError = false) {
+  const fb = document.getElementById("sched-feedback");
+  if (!fb) return;
+  fb.textContent = text;
+  fb.style.color = isError ? "var(--red)" : "#4ade80";
+  fb.style.display = "inline";
+  setTimeout(() => {
+    fb.style.display = "none";
+  }, 4000);
+}
+
+window.saveSchedule = async function() {
+  const wake = document.getElementById("sched-wake-input")?.value || "08:00";
+  const sleep = document.getElementById("sched-sleep-input")?.value || "20:00";
+  const interval = parseInt(document.getElementById("sched-interval-select")?.value || "60");
+  const on = Boolean(document.getElementById("sched-reminder-toggle")?.checked);
+
+  try {
+    const res = await fetch("./commands/schedule", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ wake, sleep, interval, on })
+    });
+    const data = await res.json();
+    if (data && data.ok) {
+      showScheduleFeedback("✔ Schedule saved & synced!");
+    } else {
+      showScheduleFeedback("❌ Failed to save", true);
+    }
+  } catch (e) {
+    console.error("Save schedule error:", e);
+    showScheduleFeedback("❌ Network error", true);
+  }
+};
+
+window.syncClock = async function() {
+  try {
+    const res = await fetch("./commands/time", { method: "POST" });
+    const data = await res.json();
+    if (data && data.ok) {
+      showScheduleFeedback("✔ Clock sync queued!");
+    } else {
+      showScheduleFeedback("❌ Failed to sync time", true);
+    }
+  } catch (e) {
+    console.error("Sync time error:", e);
+    showScheduleFeedback("❌ Network error", true);
   }
 };

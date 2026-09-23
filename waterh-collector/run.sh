@@ -42,6 +42,18 @@ if [ -f "$SERVICES_PATH" ] && jq -e '.mqtt' "$SERVICES_PATH" >/dev/null 2>&1; th
     fi
 fi
 
+# Auto-detect timezone from Supervisor API if missing or UTC
+if [ -z "$TZ" ] || [ "$TZ" = "UTC" ]; then
+    SUP_TOKEN="${SUPERVISOR_TOKEN:-$(cat /run/s6/container_environment/SUPERVISOR_TOKEN 2>/dev/null || cat /var/run/s6/container_environment/SUPERVISOR_TOKEN 2>/dev/null || true)}"
+    if [ -n "$SUP_TOKEN" ]; then
+        HA_TZ=$(curl -s -H "Authorization: Bearer ${SUP_TOKEN}" http://supervisor/core/info 2>/dev/null | jq -r '.data.timezone // empty' 2>/dev/null || true)
+        if [ -n "$HA_TZ" ] && [ "$HA_TZ" != "null" ]; then
+            echo "[WaterH Add-on] Auto-detected Home Assistant timezone: ${HA_TZ}"
+            export TZ="$HA_TZ"
+        fi
+    fi
+fi
+
 echo "[WaterH Add-on] Starting WaterH Collector for bottle: ${WATERH_ADDR}"
 if [ -f "/addons/waterh-collector/collector/collector.py" ]; then
     echo "[WaterH Add-on] Executing latest code from /addons/waterh-collector/collector/collector.py"

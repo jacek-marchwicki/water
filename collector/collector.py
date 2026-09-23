@@ -69,16 +69,273 @@ BACKOFF_CAP = 30
 
 
 
+# --- Timezone & Date Helpers ---
+
+def get_ha_timezone() -> str:
+    token = get_supervisor_token()
+    if not token:
+        return ""
+    for url in ["http://supervisor/core/info", "http://supervisor/info"]:
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={"Authorization": f"Bearer {token}"},
+                method="GET",
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                if data.get("result") == "ok" and "data" in data:
+                    tz = data["data"].get("timezone")
+                    if tz:
+                        return tz
+        except Exception:
+            pass
+    return ""
+
+
+def resolve_timezone():
+    """Detect and set local timezone from Supervisor API, system /etc, or env."""
+    tz_to_set = os.environ.get("TZ")
+    if not tz_to_set or tz_to_set == "UTC":
+        ha_tz = get_ha_timezone()
+        if ha_tz:
+            tz_to_set = ha_tz
+
+    if not tz_to_set:
+        for p in ["/etc/timezone", "/data/timezone"]:
+            if os.path.isfile(p):
+                try:
+                    val = Path(p).read_text().strip()
+                    if val:
+                        tz_to_set = val
+                        break
+                except Exception:
+                    pass
+
+    if tz_to_set:
+        try:
+            os.environ["TZ"] = tz_to_set
+            if hasattr(time, "tzset"):
+                time.tzset()
+            log.info(f"[TIME] Configured local timezone: {tz_to_set} (local time: {get_local_now().strftime('%Y-%m-%d %H:%M:%S')})")
+        except Exception as e:
+            log.warning(f"[TIME] Failed to apply timezone '{tz_to_set}': {e}")
+    else:
+        log.info(f"[TIME] No specific timezone configured; system time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+
+def get_local_now() -> datetime:
+    tz_name = os.environ.get("TZ")
+    if tz_name and tz_name != "UTC":
+        try:
+            import zoneinfo
+            return datetime.now(zoneinfo.ZoneInfo(tz_name))
+        except Exception:
+            pass
+    return datetime.now()
+
+
+def get_today_str() -> str:
+    return get_local_now().strftime("%Y-%m-%d")
+
+
+def get_today_total(db) -> int:
+    today_str = get_today_str()
+    row = db.execute(
+        "SELECT COALESCE(SUM(intake_ml), 0) FROM sips WHERE DATE(timestamp) = ?",
+        (today_str,)
+    ).fetchone()
+    return row[0] if row else 0
+
+
+def get_today_sips(db, limit: int = 50) -> list[tuple]:
+    today_str = get_today_str()
+    return db.execute(
+        f"SELECT id, timestamp, intake_ml, temp_c, tds FROM sips WHERE DATE(timestamp) = ? ORDER BY timestamp DESC LIMIT {limit}",
+        (today_str,)
+    ).fetchall()
+
+
+# --- Database & Settings Helpers ---
+
+def init_db():
+    db = sqlite3.connect(DB_PATH)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS sips (
+            id INTEGER PRIMARY KEY,
+            timestamp TEXT UNIQUE NOT NULL,
+            intake_ml INTEGER NOT NULL,
+            temp_c REAL,
+            tds INTEGER,
+            raw_hex TEXT,
+            synced INTEGER DEFAULT 0
+        )
+    """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS syncs (
+            id INTEGER PRIMARY KEY,
+            timestamp TEXT NOT NULL,
+            sip_count INTEGER,
+            new_count INTEGER,
+            acked_bytes INTEGER
+        )
+    """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+    """)
+    db.commit()
+    return db
+
+
+def get_goal_ml() -> int:
+    try:
+        db = init_db()
+        row = db.execute("SELECT value FROM settings WHERE key = 'goal_ml'").fetchone()
+        if row and row[0]:
+            return int(row[0])
+    except Exception:
+        pass
+    return 1800
+
+
+def set_goal_ml(ml: int):
+    global GOAL_ML
+    GOAL_ML = ml
+    try:
+        db = init_db()
+        db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('goal_ml', ?)", (str(ml),))
+        db.commit()
+    except Exception as e:
+        log.error(f"[DB] Error saving goal: {e}")
+    publish_ha_sensor("daily_goal", GOAL_ML, unit="mL", friendly_name="WaterH Daily Goal", icon="mdi:target-variant")
+    if ha_conn:
+        ha_conn.publish_state("sensor/daily_goal", GOAL_ML)
+
+
+DEFAULT_SCHEDULE = {
+    "wake_time": "08:00",
+    "sleep_time": "20:00",
+    "wake_hour": 8,
+    "wake_minute": 0,
+    "sleep_hour": 20,
+    "sleep_minute": 0,
+    "interval_min": 60,
+    "reminder_on": False,
+}
+
+
+def get_schedule_settings() -> dict:
+    sched = dict(DEFAULT_SCHEDULE)
+    try:
+        db = init_db()
+        rows = db.execute(
+            "SELECT key, value FROM settings WHERE key IN ('wake_time', 'sleep_time', 'reminder_interval', 'reminder_on')"
+        ).fetchall()
+        for k, v in rows:
+            if k == "wake_time" and ":" in v:
+                sched["wake_time"] = v
+                parts = v.split(":")
+                sched["wake_hour"] = int(parts[0])
+                sched["wake_minute"] = int(parts[1])
+            elif k == "sleep_time" and ":" in v:
+                sched["sleep_time"] = v
+                parts = v.split(":")
+                sched["sleep_hour"] = int(parts[0])
+                sched["sleep_minute"] = int(parts[1])
+            elif k == "reminder_interval":
+                sched["interval_min"] = int(v)
+            elif k == "reminder_on":
+                sched["reminder_on"] = v in ("1", "true", "True", "ON", "on")
+    except Exception as e:
+        log.error(f"[DB] Error loading schedule settings: {e}")
+    sched["timezone"] = os.environ.get("TZ", "UTC")
+    sched["local_time"] = get_local_now().strftime("%Y-%m-%d %H:%M:%S")
+    return sched
+
+
+def set_schedule_settings(
+    wake_time: str | None = None,
+    sleep_time: str | None = None,
+    interval_min: int | None = None,
+    reminder_on: bool | None = None,
+) -> dict:
+    try:
+        db = init_db()
+        if wake_time is not None:
+            parts = wake_time.strip().split(":")
+            h = max(0, min(23, int(parts[0])))
+            m = max(0, min(59, int(parts[1])))
+            norm_wake = f"{h:02d}:{m:02d}"
+            db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('wake_time', ?)", (norm_wake,))
+        if sleep_time is not None:
+            parts = sleep_time.strip().split(":")
+            h = max(0, min(23, int(parts[0])))
+            m = max(0, min(59, int(parts[1])))
+            norm_sleep = f"{h:02d}:{m:02d}"
+            db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('sleep_time', ?)", (norm_sleep,))
+        if interval_min is not None:
+            val = max(5, min(720, int(interval_min)))
+            db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('reminder_interval', ?)", (str(val),))
+        if reminder_on is not None:
+            db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('reminder_on', ?)", ("1" if reminder_on else "0",))
+        db.commit()
+    except Exception as e:
+        log.error(f"[DB] Error saving schedule settings: {e}")
+
+    sched = get_schedule_settings()
+    if ha_conn:
+        ha_conn.publish_state("time/wake_time", f"{sched['wake_time']}:00")
+        ha_conn.publish_state("time/sleep_time", f"{sched['sleep_time']}:00")
+        ha_conn.publish_state("number/reminder_interval", sched["interval_min"])
+        ha_conn.publish_state("switch/reminder", "ON" if sched["reminder_on"] else "OFF")
+    return sched
+
+
 # --- Protocol commands ---
 
 def cmd_bottle_data() -> bytes:
     return bytes.fromhex("47540001ff")
 
 
-def cmd_sync_settings(goal_ml: int = GOAL_ML) -> bytes:
-    now = datetime.now()
+def cmd_set_time(dt: datetime | None = None) -> bytes:
+    now = dt or get_local_now()
+    time_hex = (
+        f"{(now.year - 2000):02x}"
+        f"{now.month:02x}"
+        f"{now.day:02x}"
+        f"{now.hour:02x}"
+        f"{now.minute:02x}"
+        f"{now.second:02x}"
+    )
+    return bytes.fromhex(f"505400080703{time_hex}")
+
+
+def cmd_sync_settings(goal_ml: int | None = None, schedule: dict | None = None) -> bytes:
+    if goal_ml is None:
+        goal_ml = GOAL_ML
+    if schedule is None:
+        schedule = get_schedule_settings()
+
+    now = get_local_now()
     goal_hex = f"{goal_ml:04x}"
-    reminder_hex = "00080014003c"
+
+    on_byte = "01" if schedule.get("reminder_on", False) else "00"
+    wake_h = int(schedule.get("wake_hour", 8))
+    wake_m = int(schedule.get("wake_minute", 0))
+    sleep_h = int(schedule.get("sleep_hour", 20))
+    sleep_m = int(schedule.get("sleep_minute", 0))
+    interval = int(schedule.get("interval_min", 60))
+
+    reminder_hex = (
+        f"{on_byte}"
+        f"{wake_h:02x}{wake_m:02x}"
+        f"{sleep_h:02x}{sleep_m:02x}"
+        f"{interval:02x}"
+    )
+
     time_hex = (
         f"{(now.year - 2000):02x}"
         f"{now.month:02x}"
@@ -248,6 +505,51 @@ class HAConnection:
                 self.loop.call_soon_threadsafe(
                     self.cmd_queue.put_nowait, (cmd_recalibrate(True), "recalibrate (MQTT)")
                 )
+        elif topic == "waterh/cmd/wake_time":
+            try:
+                parts = payload.split(":")
+                val = f"{int(parts[0]):02d}:{int(parts[1]):02d}"
+                set_schedule_settings(wake_time=val)
+                if self.cmd_queue and self.loop:
+                    self.loop.call_soon_threadsafe(
+                        self.cmd_queue.put_nowait, (cmd_sync_settings(), f"schedule wake {val} (MQTT)")
+                    )
+            except Exception as e:
+                log.error(f"[MQTT] Failed to set wake_time '{payload}': {e}")
+        elif topic == "waterh/cmd/sleep_time":
+            try:
+                parts = payload.split(":")
+                val = f"{int(parts[0]):02d}:{int(parts[1]):02d}"
+                set_schedule_settings(sleep_time=val)
+                if self.cmd_queue and self.loop:
+                    self.loop.call_soon_threadsafe(
+                        self.cmd_queue.put_nowait, (cmd_sync_settings(), f"schedule sleep {val} (MQTT)")
+                    )
+            except Exception as e:
+                log.error(f"[MQTT] Failed to set sleep_time '{payload}': {e}")
+        elif topic == "waterh/cmd/reminder_interval":
+            try:
+                val = int(float(payload))
+                set_schedule_settings(interval_min=val)
+                if self.cmd_queue and self.loop:
+                    self.loop.call_soon_threadsafe(
+                        self.cmd_queue.put_nowait, (cmd_sync_settings(), f"reminder interval {val}m (MQTT)")
+                    )
+            except Exception as e:
+                log.error(f"[MQTT] Failed to set reminder_interval '{payload}': {e}")
+        elif topic == "waterh/cmd/reminder_switch":
+            on = payload.upper() in ("ON", "1", "TRUE")
+            set_schedule_settings(reminder_on=on)
+            if self.cmd_queue and self.loop:
+                self.loop.call_soon_threadsafe(
+                    self.cmd_queue.put_nowait, (cmd_sync_settings(), f"reminder {'on' if on else 'off'} (MQTT)")
+                )
+        elif topic == "waterh/cmd/sync_time":
+            if self.cmd_queue and self.loop:
+                now = get_local_now()
+                self.loop.call_soon_threadsafe(
+                    self.cmd_queue.put_nowait, (cmd_set_time(now), f"sync time {now.strftime('%H:%M:%S')} (MQTT)")
+                )
 
     def publish_discovery(self):
         device_info = {
@@ -324,6 +626,13 @@ class HAConnection:
                 "icon": "mdi:scale-balance",
                 "device": device_info,
             }),
+            ("button", "sync_time", {
+                "name": "WaterH Sync Time",
+                "unique_id": "waterh_sync_time",
+                "command_topic": "waterh/cmd/sync_time",
+                "icon": "mdi:clock-sync-outline",
+                "device": device_info,
+            }),
             ("select", "led_mode", {
                 "name": "WaterH LED Mode",
                 "unique_id": "waterh_led_mode",
@@ -345,6 +654,46 @@ class HAConnection:
                 "icon": "mdi:target",
                 "device": device_info,
             }),
+            ("time", "wake_time", {
+                "name": "WaterH Wake Time",
+                "unique_id": "waterh_wake_time",
+                "command_topic": "waterh/cmd/wake_time",
+                "state_topic": "waterh/time/wake_time/state",
+                "icon": "mdi:weather-sunset-up",
+                "device": device_info,
+            }),
+            ("time", "sleep_time", {
+                "name": "WaterH Sleep Time",
+                "unique_id": "waterh_sleep_time",
+                "command_topic": "waterh/cmd/sleep_time",
+                "state_topic": "waterh/time/sleep_time/state",
+                "icon": "mdi:weather-sunset-down",
+                "device": device_info,
+            }),
+            ("number", "reminder_interval", {
+                "name": "WaterH Reminder Interval",
+                "unique_id": "waterh_reminder_interval",
+                "command_topic": "waterh/cmd/reminder_interval",
+                "state_topic": "waterh/number/reminder_interval/state",
+                "min": 15,
+                "max": 180,
+                "step": 15,
+                "unit_of_measurement": "min",
+                "icon": "mdi:timer-outline",
+                "device": device_info,
+            }),
+            ("switch", "reminder", {
+                "name": "WaterH Hydration Reminder",
+                "unique_id": "waterh_reminder",
+                "command_topic": "waterh/cmd/reminder_switch",
+                "state_topic": "waterh/switch/reminder/state",
+                "payload_on": "ON",
+                "payload_off": "OFF",
+                "state_on": "ON",
+                "state_off": "OFF",
+                "icon": "mdi:bell-ring-outline",
+                "device": device_info,
+            }),
         ]
 
         for domain, object_id, config in discovery_configs:
@@ -355,6 +704,13 @@ class HAConnection:
         self.publish_state("sensor/daily_goal", GOAL_ML)
         self.publish_state("select/led_mode", "default")
         self.publish_state("sensor/status", "scanning")
+
+        sched = get_schedule_settings()
+        self.publish_state("time/wake_time", f"{sched['wake_time']}:00")
+        self.publish_state("time/sleep_time", f"{sched['sleep_time']}:00")
+        self.publish_state("number/reminder_interval", sched["interval_min"])
+        self.publish_state("switch/reminder", "ON" if sched["reminder_on"] else "OFF")
+
 
     def publish_state(self, entity_subpath: str, value):
         if self.client:
@@ -593,12 +949,8 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
 
         elif method == "GET" and path == "/api/today":
             db = init_db()
-            total_today = db.execute(
-                "SELECT COALESCE(SUM(intake_ml), 0) FROM sips WHERE DATE(timestamp) = DATE('now')"
-            ).fetchone()[0]
-            rows = db.execute(
-                "SELECT id, timestamp, intake_ml, temp_c, tds FROM sips WHERE DATE(timestamp) = DATE('now') ORDER BY timestamp DESC"
-            ).fetchall()
+            total_today = get_today_total(db)
+            rows = get_today_sips(db, limit=100)
             sips = [{"id": r[0], "timestamp": r[1], "intake_ml": r[2], "temp_c": r[3], "tds": r[4]} for r in rows]
             last_temp = rows[0][3] if rows and rows[0][3] else None
             resp = {
@@ -615,10 +967,15 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
             resp = {
                 "state": "connected",
                 "online": True,
-                "last_seen": datetime.now().isoformat(),
+                "last_seen": get_local_now().isoformat(),
                 "bottle": BOTTLE_ADDR,
+                "timezone": os.environ.get("TZ", "UTC"),
             }
             send_json(writer, 200, resp)
+
+        elif method == "GET" and path in ["/api/schedule", "/schedule"]:
+            sched = get_schedule_settings()
+            send_json(writer, 200, sched)
 
         elif method == "GET" and path.startswith("/api/history"):
             db = init_db()
@@ -643,12 +1000,8 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
 
         elif method == "GET" and (path.startswith("/api/data") or path == "/api/data"):
             db = init_db()
-            total_today = db.execute(
-                "SELECT COALESCE(SUM(intake_ml), 0) FROM sips WHERE DATE(timestamp) = DATE('now')"
-            ).fetchone()[0]
-            rows = db.execute(
-                "SELECT id, timestamp, intake_ml, temp_c, tds FROM sips ORDER BY timestamp DESC LIMIT 50"
-            ).fetchall()
+            total_today = get_today_total(db)
+            rows = get_today_sips(db, limit=50)
             sips = [{"id": r[0], "timestamp": r[1], "intake_ml": r[2], "temp_c": r[3], "tds": r[4]} for r in rows]
             resp = {
                 "bottle": BOTTLE_ADDR,
@@ -662,13 +1015,18 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
 
         elif method == "GET" and path == "/commands":
             resp = {"commands": [
+                "GET  /api/today",
+                "GET  /api/status",
+                "GET  /api/schedule",
+                "GET  /api/history",
                 "POST /commands/flash",
-                "POST /commands/led    {mode, color}",
-                "POST /commands/goal   {ml}",
-                "POST /commands/intake {ml}",
-                "POST /commands/reminder {on, wake, sleep, interval}",
+                "POST /commands/led       {mode, color}",
+                "POST /commands/goal      {ml}",
+                "POST /commands/schedule  {wake, sleep, interval, on}",
+                "POST /commands/time",
+                "POST /commands/intake    {ml}",
                 "POST /commands/calibrate {full}",
-                "POST /commands/raw    {hex}",
+                "POST /commands/raw       {hex}",
             ]}
             send_json(writer, 200, resp)
 
@@ -696,15 +1054,13 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
             ml = int(data.get("ml", 0))
             if ml > 0:
                 db = init_db()
-                now_str = datetime.now().isoformat()
+                now_str = get_local_now().isoformat()
                 db.execute(
                     "INSERT OR IGNORE INTO sips (timestamp, intake_ml, synced) VALUES (?, ?, 1)",
                     (now_str, ml)
                 )
                 db.commit()
-                total_today = db.execute(
-                    "SELECT COALESCE(SUM(intake_ml), 0) FROM sips WHERE DATE(timestamp) = DATE('now')"
-                ).fetchone()[0]
+                total_today = get_today_total(db)
                 publish_ha_sensor("today_intake", total_today, unit="mL", friendly_name="WaterH Today Intake", icon="mdi:cup-water", device_class="water", state_class="total_increasing")
                 if cmd_queue:
                     cmd_queue.put_nowait((cmd_sync_today_amount(total_today), f"intake {total_today}ml"))
@@ -727,24 +1083,42 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
                 send_json(writer, 400, {"error": "missing id or timestamp"})
                 return
 
-            total_today = db.execute(
-                "SELECT COALESCE(SUM(intake_ml), 0) FROM sips WHERE DATE(timestamp) = DATE('now')"
-            ).fetchone()[0]
+            total_today = get_today_total(db)
             publish_ha_sensor("today_intake", total_today, unit="mL", friendly_name="WaterH Today Intake", icon="mdi:cup-water", device_class="water", state_class="total_increasing")
             if cmd_queue:
                 cmd_queue.put_nowait((cmd_sync_today_amount(total_today), f"sync-display {total_today}ml"))
             send_json(writer, 200, {"ok": True, "today_total_ml": total_today})
 
-        elif method == "POST" and path == "/commands/reminder":
+        elif method == "POST" and path in ["/commands/schedule", "/commands/reminder"]:
             data = json.loads(body) if body else {}
-            on = data.get("on", False)
-            wake = data.get("wake", "08:00").split(":")
-            slp = data.get("sleep", "20:00").split(":")
-            interval = int(data.get("interval", 60))
-            cmd = cmd_set_reminder(on, int(wake[0]), int(wake[1]), int(slp[0]), int(slp[1]), interval)
-            label = f"reminder {'on' if on else 'off'}"
-            cmd_queue.put_nowait((cmd, label))
-            send_json(writer, 200, {"ok": True, "queued": label})
+            wake = data.get("wake") or data.get("wake_time")
+            sleep = data.get("sleep") or data.get("sleep_time")
+            interval = data.get("interval") or data.get("interval_min")
+            if interval is not None:
+                interval = int(interval)
+            on = data.get("on") if "on" in data else data.get("reminder_on")
+            if on is not None:
+                on = bool(on)
+
+            sched = set_schedule_settings(
+                wake_time=wake,
+                sleep_time=sleep,
+                interval_min=interval,
+                reminder_on=on
+            )
+            if cmd_queue:
+                cmd_queue.put_nowait((
+                    cmd_sync_settings(),
+                    f"schedule update (wake={sched['wake_time']}, sleep={sched['sleep_time']}, int={sched['interval_min']}m, on={sched['reminder_on']})"
+                ))
+            send_json(writer, 200, {"ok": True, "schedule": sched})
+
+        elif method == "POST" and path in ["/commands/time", "/commands/sync_time"]:
+            now = get_local_now()
+            if cmd_queue:
+                cmd_queue.put_nowait((cmd_set_time(now), f"sync time {now.strftime('%Y-%m-%d %H:%M:%S')}"))
+            send_json(writer, 200, {"ok": True, "local_time": now.isoformat(), "queued": f"time {now.strftime('%H:%M:%S')}"})
+
 
         elif method == "POST" and path == "/commands/calibrate":
             data = json.loads(body) if body else {}
@@ -860,63 +1234,7 @@ def bluez_full_reset(addr: str):
     bluez_power_cycle()
 
 
-# --- Database ---
-
-def init_db():
-    db = sqlite3.connect(DB_PATH)
-    db.execute("""
-        CREATE TABLE IF NOT EXISTS sips (
-            id INTEGER PRIMARY KEY,
-            timestamp TEXT UNIQUE NOT NULL,
-            intake_ml INTEGER NOT NULL,
-            temp_c REAL,
-            tds INTEGER,
-            raw_hex TEXT,
-            synced INTEGER DEFAULT 0
-        )
-    """)
-    db.execute("""
-        CREATE TABLE IF NOT EXISTS syncs (
-            id INTEGER PRIMARY KEY,
-            timestamp TEXT NOT NULL,
-            sip_count INTEGER,
-            new_count INTEGER,
-            acked_bytes INTEGER
-        )
-    """)
-    db.execute("""
-        CREATE TABLE IF NOT EXISTS settings (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL
-        )
-    """)
-    db.commit()
-    return db
-
-
-def get_goal_ml() -> int:
-    try:
-        db = init_db()
-        row = db.execute("SELECT value FROM settings WHERE key = 'goal_ml'").fetchone()
-        if row and row[0]:
-            return int(row[0])
-    except Exception:
-        pass
-    return 1800
-
-
-def set_goal_ml(ml: int):
-    global GOAL_ML
-    GOAL_ML = ml
-    try:
-        db = init_db()
-        db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('goal_ml', ?)", (str(ml),))
-        db.commit()
-    except Exception as e:
-        log.error(f"[DB] Error saving goal: {e}")
-    publish_ha_sensor("daily_goal", GOAL_ML, unit="mL", friendly_name="WaterH Daily Goal", icon="mdi:target-variant")
-    if ha_conn:
-        ha_conn.publish_state("sensor/daily_goal", GOAL_ML)
+# --- Database Operations ---
 
 
 def store_sips(db, sips):
@@ -1044,13 +1362,23 @@ async def find_waterh_device(target_addr: str, timeout: float = 12.0):
     return None
 
 
-def resolve_gatt_characteristics(client):
+async def resolve_gatt_characteristics(client):
     """Dynamically discover write and notify characteristic UUIDs on the connected WaterH bottle."""
     global WRITE_CHAR, NOTIFY_CHAR
     discovered_write = None
     discovered_notify = None
 
     try:
+        # Wait up to 2 seconds for BlueZ to populate GATT services if empty
+        for _ in range(6):
+            if list(client.services):
+                break
+            await asyncio.sleep(0.3)
+            try:
+                await client.get_services()
+            except Exception:
+                pass
+
         for service in client.services:
             for char in service.characteristics:
                 uuid_lower = char.uuid.lower()
@@ -1083,6 +1411,7 @@ def resolve_gatt_characteristics(client):
             log.warning(f"[BLE] Using default NOTIFY characteristic: {NOTIFY_CHAR}")
     except Exception as e:
         log.warning(f"[BLE] Failed to resolve GATT characteristics: {e}")
+
 
 
 def drain_queue(q: asyncio.Queue) -> list[bytes]:
@@ -1144,9 +1473,7 @@ async def sync_cycle(client, queue: asyncio.Queue, db) -> bool:
         log.info(f"[BLE] Settings sync: {'ok' if sync_ok else 'check response'}")
 
     # Step 3: Sync today's amount to bottle display
-    total_today = db.execute(
-        "SELECT COALESCE(SUM(intake_ml), 0) FROM sips WHERE DATE(timestamp) = DATE('now')"
-    ).fetchone()[0]
+    total_today = get_today_total(db)
     await ble_write_and_wait(client, cmd_sync_today_amount(total_today), "sync-display", queue, wait=1.0)
     publish_ha_sensor("today_intake", total_today, unit="mL", friendly_name="WaterH Today Intake", icon="mdi:cup-water", device_class="water", state_class="total_increasing")
     publish_ha_sensor("daily_goal", GOAL_ML, unit="mL", friendly_name="WaterH Daily Goal", icon="mdi:target-variant")
@@ -1175,9 +1502,7 @@ async def sync_cycle(client, queue: asyncio.Queue, db) -> bool:
 
     # Step 6: Store locally
     new_count = store_sips(db, sips)
-    total_today = db.execute(
-        "SELECT COALESCE(SUM(intake_ml), 0) FROM sips WHERE DATE(timestamp) = DATE('now')"
-    ).fetchone()[0]
+    total_today = get_today_total(db)
     log.info(f"[BLE] Stored {len(sips)} sips ({new_count} new), {total_today}ml today")
     publish_ha_sensor("today_intake", total_today, unit="mL", friendly_name="WaterH Today Intake", icon="mdi:cup-water", device_class="water", state_class="total_increasing")
     if sips:
@@ -1217,9 +1542,7 @@ async def ble_loop():
     db = init_db()
     log.info(f"[DB] Initialized at {DB_PATH}")
 
-    total_today = db.execute(
-        "SELECT COALESCE(SUM(intake_ml), 0) FROM sips WHERE DATE(timestamp) = DATE('now')"
-    ).fetchone()[0]
+    total_today = get_today_total(db)
 
     publish_ha_sensor("today_intake", total_today, unit="mL", friendly_name="WaterH Today Intake", icon="mdi:cup-water", device_class="water", state_class="total_increasing")
     publish_ha_sensor("daily_goal", GOAL_ML, unit="mL", friendly_name="WaterH Daily Goal", icon="mdi:target-variant")
@@ -1267,12 +1590,25 @@ async def ble_loop():
                 log.info(f"[BLE] Connected to {device.name}")
                 post_heartbeat("connected")
 
-                resolve_gatt_characteristics(client)
+                await resolve_gatt_characteristics(client)
 
                 def on_notify(sender, data: bytearray):
                     packet_queue.put_nowait(bytes(data))
 
-                await client.start_notify(NOTIFY_CHAR, on_notify)
+                try:
+                    await client.start_notify(NOTIFY_CHAR, on_notify)
+                except Exception as e:
+                    log.warning(f"[BLE] start_notify failed on {NOTIFY_CHAR} ({e}), searching fallback...")
+                    for s in client.services:
+                        for c in s.characteristics:
+                            if any(p in [prop.lower() for prop in c.properties] for p in ["notify", "indicate"]):
+                                try:
+                                    await client.start_notify(c.uuid, on_notify)
+                                    NOTIFY_CHAR = c.uuid
+                                    log.info(f"[BLE] Subscribed to fallback notify: {c.uuid}")
+                                    break
+                                except Exception:
+                                    pass
 
                 empty_cycles = 0
                 while client.is_connected and not disconnected_event.is_set():
@@ -1334,10 +1670,14 @@ async def ble_loop():
 
 def main():
     global GOAL_ML
+    resolve_timezone()
     GOAL_ML = get_goal_ml()
+    sched = get_schedule_settings()
     log.info("[INIT] WaterH Collector (full protocol)")
     log.info(f"[INIT] Bottle: {BOTTLE_ADDR}")
     log.info(f"[INIT] Goal: {GOAL_ML}ml (from database)")
+    log.info(f"[INIT] Schedule: Wake {sched['wake_time']}, Sleep {sched['sleep_time']}, Interval {sched['interval_min']}m, Reminders {'ON' if sched['reminder_on'] else 'OFF'}")
+    log.info(f"[INIT] Local Time: {get_local_now().strftime('%Y-%m-%d %H:%M:%S')} ({os.environ.get('TZ', 'UTC')})")
     log.info(f"[INIT] Poll interval: {POLL_INTERVAL}s")
     log.info(f"[INIT] API: {API_URL}")
     log.info(f"[INIT] Command server: :{CMD_PORT}")

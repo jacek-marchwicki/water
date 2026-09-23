@@ -1,12 +1,14 @@
 ARG BUILD_FROM=ghcr.io/home-assistant/aarch64-base-debian:latest
 FROM ${BUILD_FROM}
 
-# Install system dependencies (Python, BlueZ, jq)
+# Install system dependencies (Python, BlueZ, jq, tzdata, curl)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     bluez \
     jq \
+    tzdata \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python packages
