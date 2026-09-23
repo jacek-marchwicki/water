@@ -1,6 +1,7 @@
 const API = "./api";
 const POLL_INTERVAL = 10000;
 let pollTimer = null;
+let currentGoal = 1800;
 
 // --- Navigation ---
 document.querySelectorAll(".nav-btn").forEach((btn) => {
@@ -10,7 +11,7 @@ document.querySelectorAll(".nav-btn").forEach((btn) => {
     btn.classList.add("active");
     document.getElementById(`page-${btn.dataset.page}`).classList.add("active");
 
-    if (btn.dataset.page === "history" && !historyLoaded) loadHistory();
+    if (btn.dataset.page === "history") loadHistory();
   });
 });
 
@@ -119,8 +120,11 @@ async function loadToday() {
     }
 
     document.getElementById("today-bar").style.width = `${data.goal_pct}%`;
-    if (document.getElementById("display-goal") && data.goal_ml) {
-      document.getElementById("display-goal").innerText = data.goal_ml;
+    if (data.goal_ml) {
+      currentGoal = Number(data.goal_ml);
+      if (document.getElementById("display-goal")) {
+        document.getElementById("display-goal").innerText = data.goal_ml;
+      }
     }
 
     const tbody = document.getElementById("sip-table");
@@ -180,6 +184,9 @@ async function loadHistory() {
     document.getElementById("hist-best").textContent = data.best_day_ml;
     document.getElementById("hist-streak").textContent = data.current_streak;
 
+    const goal = Number(data.goal_ml) || currentGoal || Number(document.getElementById("display-goal")?.innerText) || 1800;
+    currentGoal = goal;
+
     // Bar chart with goal line
     const ctx = document.getElementById("history-chart").getContext("2d");
     if (historyChart) historyChart.destroy();
@@ -197,7 +204,7 @@ async function loadHistory() {
             label: "Intake (ml)",
             data: last30.map((d) => d.total_ml),
             backgroundColor: last30.map((d) =>
-              d.total_ml >= 2500
+              d.total_ml >= goal
                 ? "rgba(102, 187, 106, 0.7)"
                 : "rgba(79, 195, 247, 0.7)"
             ),
@@ -207,7 +214,7 @@ async function loadHistory() {
           {
             label: "Goal",
             type: "line",
-            data: last30.map(() => 2500),
+            data: last30.map(() => goal),
             borderColor: "rgba(136, 136, 136, 0.4)",
             borderDash: [6, 4],
             borderWidth: 1.5,
@@ -244,7 +251,7 @@ async function loadHistory() {
     });
 
     // Heatmap
-    buildHeatmap(data.days);
+    buildHeatmap(data.days, goal);
   } catch (e) {
     console.error("Failed to load history:", e);
     document.getElementById("heatmap").innerHTML =
@@ -252,7 +259,7 @@ async function loadHistory() {
   }
 }
 
-function buildHeatmap(days) {
+function buildHeatmap(days, goal = currentGoal || 1800) {
   const container = document.getElementById("heatmap");
   const dayMap = {};
   for (const d of days) dayMap[d.date] = d.total_ml;
@@ -298,10 +305,10 @@ function buildHeatmap(days) {
     const key = cursor2.toISOString().slice(0, 10);
     const ml = dayMap[key] || 0;
     let level = "";
-    if (ml > 0 && ml < 1000) level = "l1";
-    else if (ml >= 1000 && ml < 2000) level = "l2";
-    else if (ml >= 2000 && ml < 2500) level = "l3";
-    else if (ml >= 2500) level = "l4";
+    if (ml > 0 && ml < goal * 0.4) level = "l1";
+    else if (ml >= goal * 0.4 && ml < goal * 0.75) level = "l2";
+    else if (ml >= goal * 0.75 && ml < goal) level = "l3";
+    else if (ml >= goal) level = "l4";
 
     cells.push(`<div class="heatmap-cell ${level}"><span class="tip">${key}: ${ml}ml</span></div>`);
     cursor2.setDate(cursor2.getDate() + 1);
@@ -353,7 +360,11 @@ window.logSip = async function(ml) {
     });
     const data = await res.json();
     if (data.ok) {
+      historyLoaded = false;
       loadToday();
+      if (document.getElementById("page-history")?.classList.contains("active")) {
+        loadHistory();
+      }
     }
   } catch (e) {
     console.error("Log sip error", e);
@@ -375,7 +386,11 @@ window.deleteSip = async function(id, timestamp) {
     });
     const data = await res.json();
     if (data.ok) {
+      historyLoaded = false;
       loadToday();
+      if (document.getElementById("page-history")?.classList.contains("active")) {
+        loadHistory();
+      }
     }
   } catch (e) {
     console.error("Delete sip error", e);
@@ -394,6 +409,11 @@ window.setLED = async function() {
 
 window.setGoal = async function(ml) {
   try {
+    currentGoal = Number(ml);
+    const displayEl = document.getElementById("display-goal");
+    if (displayEl) displayEl.innerText = ml;
+    historyLoaded = false;
+
     const res = await fetch("./commands/goal", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -401,7 +421,11 @@ window.setGoal = async function(ml) {
     });
     const data = await res.json();
     if (data.ok) {
+      if (data.goal_ml) currentGoal = Number(data.goal_ml);
       loadToday();
+      if (document.getElementById("page-history")?.classList.contains("active")) {
+        loadHistory();
+      }
     }
   } catch (e) {
     console.error("Set goal error", e);

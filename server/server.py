@@ -48,6 +48,12 @@ async def lifespan(app: FastAPI):
             received_at TEXT DEFAULT (datetime('now'))
         )
     """)
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+    """)
     await db.commit()
     yield
     await db.close()
@@ -89,6 +95,20 @@ class HeartbeatPayload(BaseModel):
     state: str
     detail: str = ""
     timestamp: str
+
+
+class GoalPayload(BaseModel):
+    ml: int
+
+
+async def get_goal_ml() -> int:
+    try:
+        row = await (await db.execute("SELECT value FROM settings WHERE key = 'goal_ml'")).fetchone()
+        if row and row["value"]:
+            return int(row["value"])
+    except Exception:
+        pass
+    return int(os.environ.get("WATERH_GOAL_ML", "1800"))
 
 
 # --- Endpoints ---
@@ -133,13 +153,13 @@ async def today():
 
     sips = [{"timestamp": r["timestamp"], "intake_ml": r["intake_ml"], "temp_c": r["temp_c"]} for r in rows]
     total_ml = sum(s["intake_ml"] for s in sips)
-    goal_ml = 2500
+    goal_ml = await get_goal_ml()
 
     return {
         "date": today_str,
         "total_ml": total_ml,
         "goal_ml": goal_ml,
-        "goal_pct": min(100, round(total_ml / goal_ml * 100)),
+        "goal_pct": min(100, round(total_ml / goal_ml * 100)) if goal_ml else 0,
         "sip_count": len(sips),
         "last_temp_c": sips[-1]["temp_c"] if sips else None,
         "sips": sips,
@@ -173,12 +193,23 @@ async def history(days: int = 30):
         else:
             break
 
+    goal_ml = await get_goal_ml()
+
     return {
         "days": data,
         "avg_daily_ml": round(sum(totals) / len(totals)) if totals else 0,
         "best_day_ml": max(totals) if totals else 0,
         "current_streak": streak,
+        "goal_ml": goal_ml,
     }
+
+
+@app.post("/commands/goal")
+@app.post("/api/goal")
+async def set_goal(payload: GoalPayload):
+    await db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('goal_ml', ?)", (str(payload.ml),))
+    await db.commit()
+    return {"ok": True, "goal_ml": payload.ml}
 
 
 @app.get("/api/sips")

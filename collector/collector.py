@@ -995,6 +995,7 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
                 "avg_daily_ml": avg_daily,
                 "best_day_ml": best_day,
                 "current_streak": len(days),
+                "goal_ml": GOAL_ML,
             }
             send_json(writer, 200, resp)
 
