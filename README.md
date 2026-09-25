@@ -118,11 +118,11 @@ Using standard library `unittest` (no dependencies required):
 python3 -m unittest discover tests
 ```
 
-Using `pytest` (with coverage report):
+Using `pytest`:
 
 ```bash
-pip install pytest pytest-asyncio pytest-cov
-pytest --cov=collector --cov-report=term-missing tests
+pip install -r requirements-test.txt
+pytest tests
 ```
 
 ### Common Testing Practices

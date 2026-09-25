@@ -6,11 +6,12 @@ Operational guidelines for AI agents working in this repository.
 
 - **Always run tests before completing work:**
   ```bash
-  python3 -m unittest discover tests
-  ```
-  Or if a virtual environment with pytest is active:
-  ```bash
+  pip install -r requirements-test.txt
   pytest tests
+  ```
+  Or via standard library `unittest`:
+  ```bash
+  python3 -m unittest discover tests
   ```
 - **Hardware isolation:** Never attempt to connect to live Bluetooth adapters, BlueZ, or network brokers during testing. All external interfaces (`bleak`, `bluetoothctl`, `urllib`, MQTT brokers, sockets) must remain mocked.
 - **State isolation:** All collector tests must inherit from `IsolatedCollectorTestCase` in `tests/base.py`. This guarantees an isolated temporary SQLite database and automatic restoration of global collector state (`DB_PATH`, `GOAL_ML`, `cmd_queue`, `ha_conn`, `ha_api`, etc.).
