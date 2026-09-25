@@ -19,14 +19,13 @@ class TestGlobalScopingAndSafety(IsolatedCollectorTestCase):
     UnboundLocalError when referenced before assignment.
     """
 
-    def test_collector_no_unbound_globals(self):
-        collector_path = Path(__file__).resolve().parent.parent / "collector" / "collector.py"
-        self.assertTrue(collector_path.exists(), f"{collector_path} does not exist")
+    def _check_file_scoping(self, file_path: Path, critical_globals: set[str]) -> None:
+        self.assertTrue(file_path.exists(), f"{file_path} does not exist")
 
-        with open(collector_path, "r", encoding="utf-8") as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             source = f.read()
 
-        tree = ast.parse(source, filename=str(collector_path))
+        tree = ast.parse(source, filename=str(file_path))
 
         # Collect top-level global variable assignments (regular and type-annotated)
         top_level_globals: set[str] = set()
@@ -39,9 +38,10 @@ class TestGlobalScopingAndSafety(IsolatedCollectorTestCase):
                 if isinstance(node.target, ast.Name):
                     top_level_globals.add(node.target.id)
 
-        # Variables that are explicitly expected to be module constants/state
-        critical_globals = {"NOTIFY_CHAR", "WRITE_CHAR", "DB_PATH", "GOAL_ML", "cmd_queue", "ha_conn", "ha_api"}
-        self.assertTrue(critical_globals.issubset(top_level_globals), f"Expected critical globals not found: {critical_globals - top_level_globals}")
+        self.assertTrue(
+            critical_globals.issubset(top_level_globals),
+            f"Expected critical globals not found in {file_path.name}: {critical_globals - top_level_globals}",
+        )
 
         issues: list[str] = []
 
@@ -63,8 +63,7 @@ class TestGlobalScopingAndSafety(IsolatedCollectorTestCase):
                         declared_globals.update(subnode.names)
 
                 for subnode in ast.walk(node):
-                    # Do not descend into nested functions when inspecting this function's scope
-                    if (isinstance(subnode, (ast.FunctionDef, ast.AsyncFunctionDef))) and subnode != node:
+                    if isinstance(subnode, (ast.FunctionDef, ast.AsyncFunctionDef)) and subnode != node:
                         continue
                     if isinstance(subnode, ast.Assign):
                         for target in subnode.targets:
@@ -87,8 +86,18 @@ class TestGlobalScopingAndSafety(IsolatedCollectorTestCase):
         self.assertEqual(
             issues,
             [],
-            "Scoping violations detected in collector.py:\n" + "\n".join(issues),
+            f"Scoping violations detected in {file_path.name}:\n" + "\n".join(issues),
         )
+
+    def test_collector_no_unbound_globals(self):
+        collector_path = Path(__file__).resolve().parent.parent / "collector" / "collector.py"
+        critical_globals = {"NOTIFY_CHAR", "WRITE_CHAR", "DB_PATH", "GOAL_ML", "cmd_queue", "ha_conn", "ha_api"}
+        self._check_file_scoping(collector_path, critical_globals)
+
+    def test_server_no_unbound_globals(self):
+        server_path = Path(__file__).resolve().parent.parent / "server" / "server.py"
+        critical_globals = {"db", "DB_PATH", "API_TOKEN", "WATERH_TZ"}
+        self._check_file_scoping(server_path, critical_globals)
 
 
 if __name__ == "__main__":

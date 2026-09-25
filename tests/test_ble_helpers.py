@@ -99,6 +99,7 @@ class TestBLEHelpers(IsolatedCollectorTestCase):
         self.run_async(col.ble_write(mock_client, b"\x05", "fallback-cmd"))
         self.assertEqual(mock_client.write_gatt_char.await_count, 2)
         mock_client.write_gatt_char.assert_awaited_with("fallback-write-uuid", b"\x05", response=False)
+        self.assertEqual(col.WRITE_CHAR, "fallback-write-uuid")
 
     def test_ble_write_failure_raises(self):
         """Verify ble_write raises exception if primary and all fallbacks fail."""

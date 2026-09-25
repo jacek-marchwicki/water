@@ -448,7 +448,8 @@ class HAConnection:
         self.loop = loop
         self.cmd_queue = cmd_queue
         if hasattr(mqtt, "CallbackAPIVersion"):
-            self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, client_id="waterh_collector")
+            api_ver = getattr(mqtt.CallbackAPIVersion, "VERSION2", mqtt.CallbackAPIVersion.VERSION1)
+            self.client = mqtt.Client(api_ver, client_id="waterh_collector")
         else:
             self.client = mqtt.Client(client_id="waterh_collector")
 
@@ -466,7 +467,8 @@ class HAConnection:
             log.error(f"[MQTT] Failed to start MQTT client: {e}")
 
     def _on_connect(self, client, userdata, flags, rc, properties=None):
-        if rc == 0:
+        rc_code = getattr(rc, "value", rc)
+        if rc_code == 0:
             log.info("[MQTT] Connected to MQTT broker successfully")
             self.connected = True
             self.publish_discovery()
@@ -479,7 +481,7 @@ class HAConnection:
                 4: "Bad username or password",
                 5: "Not authorized (Check MQTT username & password in Add-on Configuration)",
             }
-            reason_str = reasons.get(rc, f"Code {rc}")
+            reason_str = reasons.get(rc_code, str(rc))
             log.error(f"[MQTT] Connection to broker failed: {reason_str}")
 
     def _on_message(self, client, userdata, msg):
@@ -1450,6 +1452,7 @@ def drain_queue(q: asyncio.Queue) -> list[bytes]:
 
 
 async def ble_write(client, cmd: bytes, label: str):
+    global WRITE_CHAR
     log.info(f"[BLE] >> {label} ({cmd.hex(' ')})")
     try:
         await client.write_gatt_char(WRITE_CHAR, cmd, response=False)
@@ -1462,6 +1465,7 @@ async def ble_write(client, cmd: bytes, label: str):
                     try:
                         await client.write_gatt_char(char.uuid, cmd, response=False)
                         log.info(f"[BLE] Successfully wrote command via fallback characteristic: {char.uuid}")
+                        WRITE_CHAR = char.uuid
                         return
                     except Exception:
                         pass

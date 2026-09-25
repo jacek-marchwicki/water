@@ -35,14 +35,14 @@ echo "--> Reloading Supervisor app store..."
 ssh -p "${HA_PORT}" "${HA_HOST}" "ha store reload || true"
 
 echo "--> Checking WaterH Collector app status..."
-INFO_JSON=$(ssh -p "${HA_PORT}" "${HA_HOST}" "ha apps info local_waterh_collector --raw-json 2>/dev/null || true")
+INFO_JSON=$(ssh -p "${HA_PORT}" "${HA_HOST}" "ha apps info local_waterh_collector --raw-json 2>/dev/null || ha addons info local_waterh_collector --raw-json 2>/dev/null || true")
 
 if echo "$INFO_JSON" | grep -q '"update_available":true'; then
     echo "--> Update detected! Upgrading WaterH Collector..."
-    ssh -p "${HA_PORT}" "${HA_HOST}" "ha apps update local_waterh_collector"
+    ssh -p "${HA_PORT}" "${HA_HOST}" "ha apps update local_waterh_collector 2>/dev/null || ha addons update local_waterh_collector"
 else
     echo "--> Rebuilding WaterH Collector with latest code..."
-    ssh -p "${HA_PORT}" "${HA_HOST}" "ha apps rebuild local_waterh_collector"
+    ssh -p "${HA_PORT}" "${HA_HOST}" "ha apps rebuild local_waterh_collector 2>/dev/null || ha addons rebuild local_waterh_collector"
 fi
 
 echo "------------------------------------------"
