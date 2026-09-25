@@ -41,8 +41,8 @@ if echo "$INFO_JSON" | grep -q '"update_available":true'; then
     echo "--> Update detected! Upgrading WaterH Collector..."
     ssh -p "${HA_PORT}" "${HA_HOST}" "ha apps update local_waterh_collector"
 else
-    echo "--> Restarting WaterH Collector with latest code..."
-    ssh -p "${HA_PORT}" "${HA_HOST}" "ha apps restart local_waterh_collector"
+    echo "--> Rebuilding WaterH Collector with latest code..."
+    ssh -p "${HA_PORT}" "${HA_HOST}" "ha apps rebuild local_waterh_collector"
 fi
 
 echo "------------------------------------------"

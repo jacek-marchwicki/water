@@ -111,6 +111,55 @@ class TestBLELoop(IsolatedCollectorTestCase):
         # Clean BlueZ removal should be called before scan and on reconnect
         self.assertGreaterEqual(mock_remove.call_count, 2)
 
+    @patch("asyncio.sleep", new_callable=AsyncMock)
+    @patch("collector.collector.start_cmd_server", new_callable=AsyncMock)
+    @patch("collector.collector.bluez_remove_device")
+    @patch("collector.collector.post_heartbeat")
+    @patch("collector.collector.sync_cycle", new_callable=AsyncMock, return_value=True)
+    def test_ble_loop_start_notify_fallback_without_unbound_error(
+        self, mock_sync_cycle, mock_heartbeat, mock_remove, mock_cmd_server, mock_sleep
+    ):
+        """Verify ble_loop recovers via fallback notify without triggering UnboundLocalError."""
+        mock_dev = MagicMock()
+        mock_dev.name = "WaterH Boost"
+
+        call_count = 0
+
+        async def fake_find(addr, timeout=12.0):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return mock_dev
+            raise asyncio.CancelledError()
+
+        class FallbackNotifyClient(FakeBleakClient):
+            def __init__(self, device, disconnected_callback=None):
+                super().__init__(device, disconnected_callback)
+                # Create a mock service with a notify characteristic
+                mock_char = MagicMock()
+                mock_char.uuid = "0000ffe1-0000-1000-8000-00805f9b34fb"
+                mock_char.properties = ["notify"]
+                mock_service = MagicMock()
+                mock_service.characteristics = [mock_char]
+                self.services = [mock_service]
+                self.subscribed_chars: list[str] = []
+
+            async def start_notify(self, char_uuid, callback):
+                if char_uuid == "0000ffe4-0000-1000-8000-00805f9b34fb":
+                    # Fail on primary notify to exercise fallback path
+                    raise RuntimeError("Primary notify handle rejected")
+                self.subscribed_chars.append(char_uuid)
+                self.is_connected = False
+
+        with patch("collector.collector.find_waterh_device", side_effect=fake_find), patch.object(
+            col, "BleakClient", FallbackNotifyClient
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                self.run_async(col.ble_loop())
+
+        # Verify fallback notify characteristic was discovered and saved
+        self.assertEqual(col.NOTIFY_CHAR, "0000ffe1-0000-1000-8000-00805f9b34fb")
+
 
 if __name__ == "__main__":
     unittest.main()

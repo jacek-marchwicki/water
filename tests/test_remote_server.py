@@ -32,45 +32,13 @@ class IsolatedServerTestCase(unittest.TestCase):
         self._orig_db = srv.db
         self._orig_db_path = srv.DB_PATH
 
-        # Initialize aiosqlite database connection with server schema
         srv.DB_PATH = str(self.db_path)
-        srv.db = self.loop.run_until_complete(aiosqlite.connect(str(self.db_path)))
-        srv.db.row_factory = aiosqlite.Row
-
-        self.run_async(srv.db.execute("""
-            CREATE TABLE IF NOT EXISTS sips (
-                id INTEGER PRIMARY KEY,
-                timestamp TEXT UNIQUE NOT NULL,
-                intake_ml INTEGER NOT NULL,
-                temp_c REAL,
-                unknown INTEGER,
-                raw_hex TEXT,
-                created_at TEXT DEFAULT (datetime('now'))
-            )
-        """))
-        self.run_async(srv.db.execute("CREATE INDEX IF NOT EXISTS idx_sips_date ON sips (DATE(timestamp))"))
-        self.run_async(srv.db.execute("""
-            CREATE TABLE IF NOT EXISTS heartbeats (
-                id INTEGER PRIMARY KEY,
-                state TEXT NOT NULL,
-                detail TEXT,
-                collector_ts TEXT,
-                received_at TEXT DEFAULT (datetime('now'))
-            )
-        """))
-        self.run_async(srv.db.execute("""
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            )
-        """))
-        self.run_async(srv.db.commit())
-
-        # TestClient for HTTP requests
-        self.client = TestClient(srv.app)
+        self.client_cm = TestClient(srv.app)
+        self.client = self.client_cm.__enter__()
 
     def tearDown(self):
-        self.run_async(srv.db.close())
+        if hasattr(self, "client_cm"):
+            self.client_cm.__exit__(None, None, None)
         srv.db = self._orig_db
         srv.DB_PATH = self._orig_db_path
         self.loop.close()
@@ -214,6 +182,7 @@ class TestServerGoalAndEndpoints(IsolatedServerTestCase):
 
     def test_lifespan_creates_settings_table(self):
         """Verify lifespan context manager creates settings table in newly initialized database."""
+        current_db = srv.db
         async def run_lifespan():
             temp_db = Path(self.temp_dir) / "lifespan_test.db"
             with patch("server.server.DB_PATH", str(temp_db)):
@@ -222,7 +191,10 @@ class TestServerGoalAndEndpoints(IsolatedServerTestCase):
                     self.assertIsNotNone(row)
                     self.assertEqual(row["name"], "settings")
 
-        self.run_async(run_lifespan())
+        try:
+            self.run_async(run_lifespan())
+        finally:
+            srv.db = current_db
 
 
 if __name__ == "__main__":
