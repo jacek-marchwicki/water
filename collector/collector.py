@@ -1493,27 +1493,38 @@ async def find_waterh_device(target_addr: str, timeout: float = 12.0):
     return None
 
 
-async def resolve_gatt_characteristics(client):
+async def resolve_gatt_characteristics(client, timeout: float = 5.0, poll_interval: float = 0.5):
     """Dynamically discover write and notify characteristic UUIDs on the connected WaterH bottle."""
     global WRITE_CHAR, NOTIFY_CHAR
     discovered_write = None
     discovered_notify = None
 
     try:
-        # Wait up to 2 seconds for BlueZ to populate GATT services if empty
-        for _ in range(6):
-            if list(client.services):
+        # Wait up to timeout (default 5.0s) for BlueZ to populate GATT services if empty
+        services = client.services
+        iterations = max(1, int(timeout / poll_interval))
+        for _ in range(iterations):
+            if services and list(services):
                 break
-            await asyncio.sleep(0.3)
-            try:
-                await client.get_services()
-            except Exception:
-                pass
+            await asyncio.sleep(poll_interval)
+            if hasattr(client, "get_services") and callable(client.get_services):
+                try:
+                    res = client.get_services()
+                    if asyncio.iscoroutine(res):
+                        res = await res
+                    services = client.services or res
+                    if services and list(services):
+                        break
+                except Exception:
+                    pass
+            else:
+                services = client.services
 
-        for service in client.services:
-            for char in service.characteristics:
+        services = client.services or services or []
+        for service in services:
+            for char in getattr(service, "characteristics", []):
                 uuid_lower = char.uuid.lower()
-                props = [p.lower() for p in char.properties]
+                props = [p.lower() for p in getattr(char, "properties", [])]
 
                 # Look for write / write-without-response characteristic
                 if any(p in props for p in ["write-without-response", "write"]):

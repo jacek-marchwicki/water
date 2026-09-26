@@ -57,7 +57,115 @@ class TestBLEHelpers(IsolatedCollectorTestCase):
         self.assertEqual(col.WRITE_CHAR, "0000ffe9-0000-1000-8000-00805f9b34fb")
         self.assertEqual(col.NOTIFY_CHAR, "0000ffe4-0000-1000-8000-00805f9b34fb")
 
-    def test_resolve_gatt_characteristics_handles_exception(self):
+    @patch("asyncio.sleep", new_callable=AsyncMock)
+    def test_resolve_gatt_characteristics_immediate_discovery(self, mock_sleep):
+        """Verify resolve_gatt_characteristics resolves immediately without sleeping when services exist."""
+        mock_char_notify = MagicMock()
+        mock_char_notify.uuid = "0000ffe4-0000-1000-8000-00805f9b34fb"
+        mock_char_notify.properties = ["notify"]
+
+        mock_char_write = MagicMock()
+        mock_char_write.uuid = "0000ffe9-0000-1000-8000-00805f9b34fb"
+        mock_char_write.properties = ["write-without-response"]
+
+        mock_service = MagicMock()
+        mock_service.characteristics = [mock_char_notify, mock_char_write]
+
+        mock_client = MagicMock()
+        mock_client.services = [mock_service]
+
+        self.run_async(col.resolve_gatt_characteristics(mock_client))
+
+        self.assertEqual(col.WRITE_CHAR, "0000ffe9-0000-1000-8000-00805f9b34fb")
+        self.assertEqual(col.NOTIFY_CHAR, "0000ffe4-0000-1000-8000-00805f9b34fb")
+        mock_sleep.assert_not_called()
+
+    @patch("asyncio.sleep", new_callable=AsyncMock)
+    def test_resolve_gatt_characteristics_retries_and_succeeds(self, mock_sleep):
+        """Verify resolve_gatt_characteristics retries multiple times when services are delayed, then succeeds."""
+        mock_char_notify = MagicMock()
+        mock_char_notify.uuid = "0000ffe4-0000-1000-8000-00805f9b34fb"
+        mock_char_notify.properties = ["notify"]
+
+        mock_char_write = MagicMock()
+        mock_char_write.uuid = "0000ffe9-0000-1000-8000-00805f9b34fb"
+        mock_char_write.properties = ["write-without-response"]
+
+        mock_service = MagicMock()
+        mock_service.characteristics = [mock_char_notify, mock_char_write]
+
+        mock_client = MagicMock()
+        mock_client.services = []
+
+        call_count = 0
+        async def fake_get_services():
+            nonlocal call_count
+            call_count += 1
+            if call_count >= 2:
+                mock_client.services = [mock_service]
+                return [mock_service]
+            return []
+
+        mock_client.get_services = AsyncMock(side_effect=fake_get_services)
+
+        col.WRITE_CHAR = "old_write"
+        col.NOTIFY_CHAR = "old_notify"
+
+        self.run_async(col.resolve_gatt_characteristics(mock_client, timeout=5.0, poll_interval=0.5))
+
+        self.assertEqual(col.WRITE_CHAR, "0000ffe9-0000-1000-8000-00805f9b34fb")
+        self.assertEqual(col.NOTIFY_CHAR, "0000ffe4-0000-1000-8000-00805f9b34fb")
+        self.assertEqual(mock_sleep.await_count, 2)
+
+    @patch("asyncio.sleep", new_callable=AsyncMock)
+    def test_resolve_gatt_characteristics_timeout_fallback(self, mock_sleep):
+        """Verify resolve_gatt_characteristics retries up to timeout (5s) before falling back to defaults."""
+        mock_client = MagicMock()
+        mock_client.services = []
+        mock_client.get_services = AsyncMock(return_value=[])
+
+        col.WRITE_CHAR = "default_write"
+        col.NOTIFY_CHAR = "default_notify"
+
+        self.run_async(col.resolve_gatt_characteristics(mock_client, timeout=5.0, poll_interval=0.5))
+
+        self.assertEqual(col.WRITE_CHAR, "default_write")
+        self.assertEqual(col.NOTIFY_CHAR, "default_notify")
+        self.assertEqual(mock_sleep.await_count, 10)
+
+    @patch("asyncio.sleep", new_callable=AsyncMock)
+    def test_resolve_gatt_characteristics_handles_none_services(self, mock_sleep):
+        """Verify resolve_gatt_characteristics handles None services without throwing TypeError."""
+        mock_char_notify = MagicMock()
+        mock_char_notify.uuid = "0000ffe4-0000-1000-8000-00805f9b34fb"
+        mock_char_notify.properties = ["notify"]
+
+        mock_char_write = MagicMock()
+        mock_char_write.uuid = "0000ffe9-0000-1000-8000-00805f9b34fb"
+        mock_char_write.properties = ["write-without-response"]
+
+        mock_service = MagicMock()
+        mock_service.characteristics = [mock_char_notify, mock_char_write]
+
+        mock_client = MagicMock()
+        mock_client.services = None
+
+        async def fake_get_services():
+            mock_client.services = [mock_service]
+            return [mock_service]
+
+        mock_client.get_services = AsyncMock(side_effect=fake_get_services)
+
+        col.WRITE_CHAR = "old_write"
+        col.NOTIFY_CHAR = "old_notify"
+
+        self.run_async(col.resolve_gatt_characteristics(mock_client, timeout=5.0, poll_interval=0.5))
+
+        self.assertEqual(col.WRITE_CHAR, "0000ffe9-0000-1000-8000-00805f9b34fb")
+        self.assertEqual(col.NOTIFY_CHAR, "0000ffe4-0000-1000-8000-00805f9b34fb")
+
+    @patch("asyncio.sleep", new_callable=AsyncMock)
+    def test_resolve_gatt_characteristics_handles_exception(self, mock_sleep):
         """Verify resolve_gatt_characteristics gracefully handles errors without raising."""
         mock_client = MagicMock()
         mock_client.services = MagicMock(side_effect=AttributeError("no services"))
