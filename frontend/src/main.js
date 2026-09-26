@@ -27,6 +27,92 @@ function renderStatus() {
   }
 }
 
+let latestBattery = null;
+
+function renderBattery(battery, charging) {
+  latestBattery = { battery, charging };
+  if (typeof document === "undefined") return;
+
+  const pctEl = document.getElementById("today-battery");
+  const unitEl = document.getElementById("today-battery-unit");
+  const barEl = document.getElementById("battery-bar");
+  const badgeEl = document.getElementById("battery-charging-badge");
+  const statusEl = document.getElementById("battery-status-text");
+
+  const headerPill = document.getElementById("header-battery");
+  const headerVal = document.getElementById("header-battery-val");
+  const headerIcon = document.getElementById("header-battery-icon");
+
+  if (battery === null || battery === undefined || isNaN(Number(battery))) {
+    if (pctEl) pctEl.textContent = "—";
+    if (unitEl) unitEl.style.display = "none";
+    if (barEl) barEl.style.width = "0%";
+    if (badgeEl) badgeEl.style.display = "none";
+    if (statusEl) {
+      statusEl.textContent = "Waiting for sync";
+      statusEl.style.color = "var(--text-dim)";
+    }
+    if (headerPill) headerPill.style.display = "none";
+    return;
+  }
+
+  const pct = Math.max(0, Math.min(100, Math.round(Number(battery))));
+  const isCharging = Boolean(charging);
+
+  if (pctEl) {
+    if (firstLoad) {
+      pctEl.textContent = String(pct);
+    } else {
+      animateValue(pctEl, String(pct));
+    }
+  }
+  if (unitEl) unitEl.style.display = "inline";
+
+  // Battery level bar with contextual styling
+  if (barEl) {
+    barEl.style.width = `${pct}%`;
+    if (isCharging) {
+      barEl.style.background = "#38bdf8";
+    } else if (pct <= 20) {
+      barEl.style.background = "var(--red)";
+    } else if (pct <= 40) {
+      barEl.style.background = "#fbbf24";
+    } else {
+      barEl.style.background = "var(--green)";
+    }
+  }
+
+  // Charging badge
+  if (badgeEl) {
+    badgeEl.style.display = isCharging ? "inline-flex" : "none";
+  }
+
+  // Card status text
+  if (statusEl) {
+    if (isCharging) {
+      statusEl.textContent = "⚡ Charging";
+      statusEl.style.color = "#38bdf8";
+    } else if (pct <= 20) {
+      statusEl.textContent = "Low Battery";
+      statusEl.style.color = "var(--red)";
+    } else {
+      statusEl.textContent = "Not charging";
+      statusEl.style.color = "var(--text-dim)";
+    }
+  }
+
+  // Header pill (persistent across all pages)
+  if (headerPill) {
+    headerPill.style.display = "inline-flex";
+    headerPill.className = "battery-pill" + (isCharging ? " charging" : pct <= 20 ? " low" : "");
+    if (headerVal) headerVal.textContent = `${pct}%`;
+    if (headerIcon) {
+      headerIcon.textContent = isCharging ? "⚡" : (pct <= 20 ? "🪫" : "🔋");
+    }
+    headerPill.title = `Battery: ${pct}%${isCharging ? " (Charging)" : ""}`;
+  }
+}
+
 function startStatusTimer() {
   stopStatusTimer();
   statusTimer = setInterval(renderStatus, 1000);
@@ -129,6 +215,15 @@ async function loadToday() {
 
     latestStatus = status;
     renderStatus();
+
+    const battery = (status && status.battery !== undefined && status.battery !== null)
+      ? status.battery
+      : (data && data.battery !== undefined && data.battery !== null ? data.battery : null);
+    const charging = (status && status.charging !== undefined && status.charging !== null)
+      ? status.charging
+      : (data && data.charging !== undefined && data.charging !== null ? data.charging : null);
+
+    renderBattery(battery, charging);
 
     const mlEl = document.getElementById("today-ml");
     const sipsEl = document.getElementById("today-sips");
@@ -609,4 +704,6 @@ root.parseDate = parseDate;
 root.timeAgo = timeAgo;
 root.renderStatus = renderStatus;
 root.getLatestStatus = () => latestStatus;
+root.renderBattery = renderBattery;
+root.getLatestBattery = () => latestBattery;
 

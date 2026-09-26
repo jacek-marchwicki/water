@@ -18,7 +18,13 @@
   <div id="app">
     <header>
       <h1>WaterH</h1>
-      <span id="status" class="status"></span>
+      <div class="header-right">
+        <span id="header-battery" class="battery-pill" style="display:none;" title="Bottle Battery">
+          <span id="header-battery-icon">🔋</span>
+          <span id="header-battery-val">--%</span>
+        </span>
+        <span id="status" class="status"></span>
+      </div>
     </header>
 
     <nav>
@@ -43,6 +49,15 @@
           <div class="stat">
             <div class="stat-label">Goal</div>
             <div class="stat-value"><span id="today-pct">0</span><span class="unit">%</span></div>
+          </div>
+          <div class="stat" id="stat-battery">
+            <div class="stat-label">Battery</div>
+            <div class="stat-value">
+              <span id="today-battery">—</span><span class="unit" id="today-battery-unit" style="display:none;">%</span>
+              <span id="battery-charging-badge" class="charging-badge" style="display:none;">⚡ Charging</span>
+            </div>
+            <div class="progress"><div class="progress-fill" id="battery-bar" style="width: 0%"></div></div>
+            <div class="stat-sub" id="battery-status-text">Waiting for sync</div>
           </div>
         </div>
 

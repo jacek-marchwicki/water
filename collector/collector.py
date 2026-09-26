@@ -81,6 +81,8 @@ settings_synced: bool = False
 last_settings_sync: datetime | None = None
 last_synced_intake: int | None = None
 last_seen: datetime | None = None
+battery: int | None = None
+charging: bool | None = None
 
 
 
@@ -256,6 +258,38 @@ def get_last_seen_iso() -> str:
     except Exception:
         pass
     return get_local_now().isoformat()
+
+
+def get_battery_state() -> tuple[int | None, bool | None]:
+    global battery, charging
+    if battery is not None or charging is not None:
+        return battery, charging
+    try:
+        db = init_db()
+        rows = db.execute("SELECT key, value FROM settings WHERE key IN ('battery', 'charging')").fetchall()
+        val_map = {r[0]: r[1] for r in rows}
+        bat = int(val_map["battery"]) if "battery" in val_map and val_map["battery"] is not None and str(val_map["battery"]).isdigit() else None
+        chg = (val_map["charging"] == "1") if "charging" in val_map and val_map["charging"] is not None else None
+        battery = bat
+        charging = chg
+        return bat, chg
+    except Exception:
+        return None, None
+
+
+def set_battery_state(bat: int | None, chg: bool | None):
+    global battery, charging
+    battery = bat
+    charging = chg
+    try:
+        db = init_db()
+        if bat is not None:
+            db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('battery', ?)", (str(bat),))
+        if chg is not None:
+            db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('charging', ?)", ("1" if chg else "0",))
+        db.commit()
+    except Exception as e:
+        log.error(f"[DB] Error saving battery state: {e}")
 
 
 
@@ -851,7 +885,8 @@ class HARestAPI:
         if not self.token:
             return
 
-        entity_id = f"sensor.waterh_{entity_name}"
+        domain = "binary_sensor" if (device_class == "battery_charging" or entity_name == "charging") else "sensor"
+        entity_id = f"{domain}.waterh_{entity_name}"
         attributes = {}
         if friendly_name:
             attributes["friendly_name"] = friendly_name
@@ -1005,23 +1040,29 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
             rows = get_today_sips(db, limit=100)
             sips = [{"id": r[0], "timestamp": r[1], "intake_ml": r[2], "temp_c": None, "tds": r[4], "raw_hex": r[5] if len(r) > 5 else None} for r in rows]
             last_temp = None
+            bat, chg = get_battery_state()
             resp = {
                 "total_ml": total_today,
                 "goal_ml": GOAL_ML,
                 "goal_pct": round((total_today / GOAL_ML) * 100) if GOAL_ML else 0,
                 "sip_count": len(rows),
                 "last_temp_c": last_temp,
+                "battery": bat,
+                "charging": chg,
                 "sips": sips,
             }
             send_json(writer, 200, resp)
 
         elif method == "GET" and path == "/api/status":
+            bat, chg = get_battery_state()
             resp = {
                 "state": "connected",
                 "online": True,
                 "last_seen": get_last_seen_iso(),
                 "bottle": BOTTLE_ADDR,
                 "timezone": os.environ.get("TZ", "UTC"),
+                "battery": bat,
+                "charging": chg,
                 "settings_synced": settings_synced,
                 "last_settings_sync": last_settings_sync.isoformat() if last_settings_sync else None,
                 "last_synced_intake": last_synced_intake,
@@ -1255,7 +1296,8 @@ def publish_ha_sensor(
 ):
     """Publish sensor state via MQTT if enabled; fallback to Direct REST API ONLY if MQTT is disabled."""
     if ha_conn:
-        ha_conn.publish_state(f"sensor/{entity_name}", state_value)
+        prefix = "binary_sensor" if (device_class == "battery_charging" or entity_name == "charging") else "sensor"
+        ha_conn.publish_state(f"{prefix}/{entity_name}", state_value)
     elif ha_api:
         ha_api.update_sensor(
             entity_name,
@@ -1371,9 +1413,12 @@ def post_heartbeat(state: str, detail: str = ""):
     publish_ha_sensor("status", status_val, friendly_name="WaterH Collector Status", icon="mdi:bluetooth-connect")
     if not API_TOKEN:
         return
+    bat, chg = get_battery_state()
     payload = json.dumps({
         "state": state, "detail": detail,
         "timestamp": datetime.now().isoformat(),
+        "battery": bat,
+        "charging": chg,
     }).encode()
     req = urllib.request.Request(
         HEARTBEAT_URL, data=payload,
@@ -1550,8 +1595,12 @@ async def sync_cycle(client, queue: asyncio.Queue, db) -> bool:
     if rp_pkts:
         rp = rp_pkts[0]
         if len(rp) > 31:
-            log.info(f"[BLE] Battery: {rp[6]}%, charging: {rp[31]}")
-            publish_ha_sensor("battery", rp[6], unit="%", friendly_name="WaterH Battery", device_class="battery")
+            bat_pct = rp[6]
+            is_charging = (rp[31] in (1, 2))
+            log.info(f"[BLE] Battery: {bat_pct}%, charging: {rp[31]}")
+            set_battery_state(bat_pct, is_charging)
+            publish_ha_sensor("battery", bat_pct, unit="%", friendly_name="WaterH Battery", device_class="battery")
+            publish_ha_sensor("charging", "ON" if is_charging else "OFF", friendly_name="WaterH Charging", device_class="battery_charging")
         bottle_clock = parse_bottle_time(rp)
     else:
         log.warning("[BLE] No bottle data response")

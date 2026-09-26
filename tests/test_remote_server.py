@@ -223,6 +223,35 @@ class TestServerGoalAndEndpoints(IsolatedServerTestCase):
         self.assertEqual(data["state"], "unknown")
         self.assertTrue(data["last_seen"].startswith("2026-09-26T19:00:00+00:00"))
 
+    def test_heartbeat_with_battery_and_charging_reflected_in_status_and_today(self):
+        """Verify POST /api/heartbeat records battery and charging, and status/today endpoints return them."""
+        hb_resp = self.client.post(
+            "/api/heartbeat",
+            json={
+                "state": "connected",
+                "detail": "charging on dock",
+                "timestamp": "2026-09-26T21:30:00",
+                "battery": 92,
+                "charging": True,
+            },
+            headers={"Authorization": f"Bearer {srv.API_TOKEN}"}
+        )
+        self.assertEqual(hb_resp.status_code, 200)
+
+        # Status endpoint
+        status_resp = self.client.get("/api/status")
+        self.assertEqual(status_resp.status_code, 200)
+        status_data = status_resp.json()
+        self.assertEqual(status_data["battery"], 92)
+        self.assertTrue(status_data["charging"])
+
+        # Today endpoint
+        today_resp = self.client.get("/api/today")
+        self.assertEqual(today_resp.status_code, 200)
+        today_data = today_resp.json()
+        self.assertEqual(today_data["battery"], 92)
+        self.assertTrue(today_data["charging"])
+
 
 if __name__ == "__main__":
     unittest.main()

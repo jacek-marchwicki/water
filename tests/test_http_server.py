@@ -4,6 +4,7 @@ Unit tests for the embedded command HTTP server and Web UI endpoints.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta
 import json
 import unittest
 from pathlib import Path
@@ -167,6 +168,22 @@ class TestHttpServer(IsolatedCollectorTestCase):
         self.assertEqual(status_code, 200)
         self.assertEqual(data["last_seen"], "2026-09-26T20:15:00+02:00")
 
+    def test_get_api_status_with_battery_and_charging(self):
+        """Verify GET /api/status returns battery and charging states when available."""
+        col.set_battery_state(88, True)
+        status_code, data, _ = self.run_async(self._send_request("GET", "/api/status"))
+        self.assertEqual(status_code, 200)
+        self.assertEqual(data["battery"], 88)
+        self.assertTrue(data["charging"])
+
+    def test_get_api_today_with_battery_and_charging(self):
+        """Verify GET /api/today includes battery and charging info."""
+        col.set_battery_state(75, False)
+        status_code, data, _ = self.run_async(self._send_request("GET", "/api/today"))
+        self.assertEqual(status_code, 200)
+        self.assertEqual(data["battery"], 75)
+        self.assertFalse(data["charging"])
+
     def test_get_commands_list(self):
         """Verify GET /commands returns supported command documentation."""
         status_code, data, _ = self.run_async(self._send_request("GET", "/commands"))
@@ -177,12 +194,15 @@ class TestHttpServer(IsolatedCollectorTestCase):
     def test_get_api_today_and_api_data(self):
         """Verify GET /api/today and /api/data return aggregated today intake and sips."""
         db = col.init_db()
-        # Insert a sip from today and a sip from yesterday
+        now_str = col.get_local_now().isoformat()
+        yesterday_str = (col.get_local_now() - timedelta(days=1)).isoformat()
         db.execute(
-            "INSERT INTO sips (timestamp, intake_ml, temp_c, tds) VALUES (datetime('now'), 250, 21.0, 50)"
+            "INSERT INTO sips (timestamp, intake_ml, temp_c, tds) VALUES (?, 250, 21.0, 50)",
+            (now_str,)
         )
         db.execute(
-            "INSERT INTO sips (timestamp, intake_ml, temp_c, tds) VALUES (datetime('now', '-1 day'), 400, 20.0, 45)"
+            "INSERT INTO sips (timestamp, intake_ml, temp_c, tds) VALUES (?, 400, 20.0, 45)",
+            (yesterday_str,)
         )
         db.commit()
         db.close()

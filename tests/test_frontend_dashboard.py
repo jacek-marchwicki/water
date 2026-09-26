@@ -84,6 +84,65 @@ class TestFrontendDashboardDateHandling(unittest.TestCase):
         if (typeof renderStatus !== 'function') throw new Error('renderStatus not a function');
         if (typeof getLatestStatus !== 'function') throw new Error('getLatestStatus not a function');
         renderStatus(); // Should safely no-op when document/latestStatus is null
+
+        // Test 12: renderBattery and getLatestBattery exports
+        const { renderBattery, getLatestBattery } = globalThis;
+        if (typeof renderBattery !== 'function') throw new Error('renderBattery not a function');
+        if (typeof getLatestBattery !== 'function') throw new Error('getLatestBattery not a function');
+
+        renderBattery(88, false);
+        const lb1 = getLatestBattery();
+        if (!lb1 || lb1.battery !== 88 || lb1.charging !== false) throw new Error('getLatestBattery(88, false) failed');
+
+        // Mock document DOM
+        const mockElements = {
+            'today-battery': { textContent: '' },
+            'today-battery-unit': { style: { display: '' } },
+            'battery-bar': { style: { width: '', background: '' } },
+            'battery-charging-badge': { style: { display: '' } },
+            'battery-status-text': { textContent: '', style: { color: '' } },
+            'header-battery': { style: { display: '' }, className: '', title: '' },
+            'header-battery-val': { textContent: '' },
+            'header-battery-icon': { textContent: '' },
+        };
+        globalThis.document = {
+            getElementById: (id) => mockElements[id] || null,
+            querySelectorAll: () => [],
+        };
+
+        // Test 13: Charging state (95%, charging)
+        renderBattery(95, true);
+        if (mockElements['today-battery'].textContent !== '95') throw new Error('today-battery expected 95');
+        if (mockElements['battery-bar'].style.width !== '95%') throw new Error('battery-bar expected 95%');
+        if (mockElements['battery-bar'].style.background !== '#38bdf8') throw new Error('charging bar expected cyan #38bdf8');
+        if (mockElements['battery-charging-badge'].style.display !== 'inline-flex') throw new Error('badge expected inline-flex');
+        if (!mockElements['battery-status-text'].textContent.includes('Charging')) throw new Error('status text expected Charging');
+        if (mockElements['header-battery'].style.display !== 'inline-flex') throw new Error('header pill expected inline-flex');
+        if (!mockElements['header-battery'].className.includes('charging')) throw new Error('header pill expected charging class');
+        if (mockElements['header-battery-icon'].textContent !== '⚡') throw new Error('header icon expected ⚡');
+
+        // Test 14: Discharging normal (80%, not charging)
+        renderBattery(80, false);
+        if (mockElements['today-battery'].textContent !== '80') throw new Error('today-battery expected 80');
+        if (mockElements['battery-bar'].style.width !== '80%') throw new Error('battery-bar expected 80%');
+        if (mockElements['battery-bar'].style.background !== 'var(--green)') throw new Error('normal bar expected var(--green)');
+        if (mockElements['battery-charging-badge'].style.display !== 'none') throw new Error('badge expected none');
+        if (mockElements['battery-status-text'].textContent !== 'Not charging') throw new Error('status text expected Not charging');
+        if (mockElements['header-battery-icon'].textContent !== '🔋') throw new Error('header icon expected 🔋');
+
+        // Test 15: Low battery (15%, not charging)
+        renderBattery(15, false);
+        if (mockElements['today-battery'].textContent !== '15') throw new Error('today-battery expected 15');
+        if (mockElements['battery-bar'].style.background !== 'var(--red)') throw new Error('low bar expected var(--red)');
+        if (mockElements['battery-status-text'].textContent !== 'Low Battery') throw new Error('status text expected Low Battery');
+        if (mockElements['header-battery-icon'].textContent !== '🪫') throw new Error('header icon expected 🪫');
+        if (!mockElements['header-battery'].className.includes('low')) throw new Error('header pill expected low class');
+
+        // Test 16: Null / uninitialized battery
+        renderBattery(null, null);
+        if (mockElements['today-battery'].textContent !== '—') throw new Error('null battery expected —');
+        if (mockElements['header-battery'].style.display !== 'none') throw new Error('null header pill expected hidden');
+        if (mockElements['battery-status-text'].textContent !== 'Waiting for sync') throw new Error('null status expected Waiting for sync');
         """
 
         res = subprocess.run(

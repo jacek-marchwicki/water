@@ -39,6 +39,39 @@ h1 {
   font-weight: 600;
 }
 
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.battery-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 0.75em;
+  color: var(--text);
+  font-family: var(--mono);
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.battery-pill.charging {
+  border-color: rgba(56, 189, 248, 0.4);
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+}
+
+.battery-pill.low {
+  border-color: rgba(239, 83, 80, 0.4);
+  background: rgba(239, 83, 80, 0.12);
+  color: #ef5350;
+}
+
 .status {
   font-size: 0.75em;
   color: var(--text-dim);
@@ -128,6 +161,39 @@ nav {
   background: var(--accent);
   border-radius: 2px;
   transition: width 0.5s ease;
+}
+
+.stat-sub {
+  font-size: 0.65em;
+  color: var(--text-dim);
+  margin-top: 6px;
+  letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.charging-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.45em;
+  font-weight: 700;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 4px;
+  padding: 2px 6px;
+  margin-left: 6px;
+  vertical-align: middle;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  animation: pulseGlow 2.5s infinite ease-in-out;
+}
+
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 1; box-shadow: 0 0 8px rgba(56, 189, 248, 0.4); }
 }
 
 table {

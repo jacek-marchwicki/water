@@ -38,6 +38,8 @@ class IsolatedCollectorTestCase(unittest.TestCase):
         self._orig_last_settings_sync = col.last_settings_sync
         self._orig_last_synced_intake = col.last_synced_intake
         self._orig_last_seen = getattr(col, "last_seen", None)
+        self._orig_battery = getattr(col, "battery", None)
+        self._orig_charging = getattr(col, "charging", None)
 
         # Set isolated globals
         col.DB_PATH = str(self.db_path)
@@ -52,6 +54,8 @@ class IsolatedCollectorTestCase(unittest.TestCase):
         col.last_settings_sync = None
         col.last_synced_intake = None
         col.last_seen = None
+        col.battery = None
+        col.charging = None
 
     def tearDown(self):
         # Restore globals
@@ -67,6 +71,8 @@ class IsolatedCollectorTestCase(unittest.TestCase):
         col.last_settings_sync = self._orig_last_settings_sync
         col.last_synced_intake = self._orig_last_synced_intake
         col.last_seen = self._orig_last_seen
+        col.battery = self._orig_battery
+        col.charging = self._orig_charging
 
         # Clean up temporary directory
         if os.path.exists(self.temp_dir):

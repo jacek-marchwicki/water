@@ -48,9 +48,19 @@ async def lifespan(app: FastAPI):
             state TEXT NOT NULL,
             detail TEXT,
             collector_ts TEXT,
+            battery INTEGER,
+            charging INTEGER,
             received_at TEXT DEFAULT (datetime('now'))
         )
     """)
+    try:
+        await db.execute("ALTER TABLE heartbeats ADD COLUMN battery INTEGER")
+    except Exception:
+        pass
+    try:
+        await db.execute("ALTER TABLE heartbeats ADD COLUMN charging INTEGER")
+    except Exception:
+        pass
     await db.execute("""
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
@@ -98,6 +108,8 @@ class HeartbeatPayload(BaseModel):
     state: str
     detail: str = ""
     timestamp: str
+    battery: Optional[int] = None
+    charging: Optional[bool] = None
 
 
 class GoalPayload(BaseModel):
@@ -136,9 +148,10 @@ async def ingest(payload: IngestPayload, authorization: str = Header(None)):
 @app.post("/api/heartbeat")
 async def heartbeat(payload: HeartbeatPayload, authorization: str = Header(None)):
     verify_token(authorization)
+    chg = 1 if payload.charging is True else (0 if payload.charging is False else None)
     await db.execute(
-        "INSERT INTO heartbeats (state, detail, collector_ts) VALUES (?, ?, ?)",
-        (payload.state, payload.detail, payload.timestamp),
+        "INSERT INTO heartbeats (state, detail, collector_ts, battery, charging) VALUES (?, ?, ?, ?, ?)",
+        (payload.state, payload.detail, payload.timestamp, payload.battery, chg),
     )
     # Clean up old heartbeats (keep last 7 days)
     await db.execute("DELETE FROM heartbeats WHERE received_at < datetime('now', '-7 days')")
@@ -158,6 +171,13 @@ async def today():
     total_ml = sum(s["intake_ml"] for s in sips)
     goal_ml = await get_goal_ml()
 
+    hb = await (await db.execute(
+        "SELECT battery, charging FROM heartbeats ORDER BY id DESC LIMIT 1"
+    )).fetchone()
+    hb_keys = hb.keys() if hb and hasattr(hb, "keys") else []
+    bat = hb["battery"] if "battery" in hb_keys and hb["battery"] is not None else None
+    chg = (bool(hb["charging"]) if hb["charging"] is not None else None) if "charging" in hb_keys else None
+
     return {
         "date": today_str,
         "total_ml": total_ml,
@@ -165,6 +185,8 @@ async def today():
         "goal_pct": min(100, round(total_ml / goal_ml * 100)) if goal_ml else 0,
         "sip_count": len(sips),
         "last_temp_c": sips[-1]["temp_c"] if sips else None,
+        "battery": bat,
+        "charging": chg,
         "sips": sips,
     }
 
@@ -243,13 +265,15 @@ async def widget():
         "goal_pct": data["goal_pct"],
         "sip_count": data["sip_count"],
         "last_temp_c": data["last_temp_c"],
+        "battery": data.get("battery"),
+        "charging": data.get("charging"),
     }
 
 
 @app.get("/api/status")
 async def status():
     row = await (await db.execute(
-        "SELECT state, detail, collector_ts, received_at FROM heartbeats ORDER BY id DESC LIMIT 1"
+        "SELECT state, detail, collector_ts, received_at, battery, charging FROM heartbeats ORDER BY id DESC LIMIT 1"
     )).fetchone()
 
     if not row:
@@ -264,11 +288,15 @@ async def status():
                 last_sync = dt.isoformat()
             except ValueError:
                 pass
-        return {"online": online, "state": "unknown", "detail": "", "last_seen": last_sync}
+        return {"online": online, "state": "unknown", "detail": "", "last_seen": last_sync, "battery": None, "charging": None}
 
     received = datetime.fromisoformat(row["received_at"]).replace(tzinfo=timezone.utc)
     age_seconds = (datetime.now(timezone.utc) - received).total_seconds()
     online = age_seconds < 120 and row["state"] in ("connected", "scanning")
+
+    keys = row.keys() if hasattr(row, "keys") else []
+    bat = row["battery"] if "battery" in keys and row["battery"] is not None else None
+    chg = (bool(row["charging"]) if row["charging"] is not None else None) if "charging" in keys else None
 
     return {
         "online": online,
@@ -276,6 +304,8 @@ async def status():
         "detail": row["detail"],
         "last_seen": received.isoformat(),
         "collector_ts": row["collector_ts"],
+        "battery": bat,
+        "charging": chg,
     }
 
 
