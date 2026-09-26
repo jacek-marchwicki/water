@@ -4,6 +4,7 @@ Unit tests for the end-to-end BLE synchronization cycle.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -134,6 +135,170 @@ class TestSyncCycle(IsolatedCollectorTestCase):
         # Battery should not be published if no RP packet
         battery_calls = [c for c in mock_publish.call_args_list if c[0][0] == "battery"]
         self.assertEqual(len(battery_calls), 0)
+        db.close()
+
+    def test_parse_bottle_time_valid_and_invalid(self):
+        """Verify parse_bottle_time correctly extracts datetime or returns None for malformed packets."""
+        # Valid packet: 2026-09-26 22:32:46 (1a 09 1a 16 20 2e at offset 9-14)
+        rp_valid = bytearray(b"\x52\x50\x00\x27\x00\x00\x58\x00\x00\x1a\x09\x1a\x16\x20\x2e" + b"\x00" * 20)
+        dt = col.parse_bottle_time(bytes(rp_valid))
+        self.assertIsNotNone(dt)
+        self.assertEqual(dt, datetime(2026, 9, 26, 22, 32, 46))
+
+        # Too short (<15 bytes)
+        self.assertIsNone(col.parse_bottle_time(b"\x52\x50\x00\x27"))
+
+        # Invalid month 13
+        rp_bad_month = bytearray(rp_valid)
+        rp_bad_month[10] = 13
+        self.assertIsNone(col.parse_bottle_time(bytes(rp_bad_month)))
+
+        # Invalid day 32
+        rp_bad_day = bytearray(rp_valid)
+        rp_bad_day[11] = 32
+        self.assertIsNone(col.parse_bottle_time(bytes(rp_bad_day)))
+
+        # Invalid hour 25
+        rp_bad_hour = bytearray(rp_valid)
+        rp_bad_hour[12] = 25
+        self.assertIsNone(col.parse_bottle_time(bytes(rp_bad_hour)))
+
+        # Year out of range (e.g. year 2010 -> offset 10)
+        rp_bad_year = bytearray(rp_valid)
+        rp_bad_year[9] = 10
+        self.assertIsNone(col.parse_bottle_time(bytes(rp_bad_year)))
+
+    def test_calculate_clock_drift(self):
+        """Verify calculate_clock_drift computes absolute differences with naive and aware datetimes."""
+        base_time = datetime(2026, 9, 26, 12, 0, 0)
+        # Identical
+        self.assertEqual(col.calculate_clock_drift(base_time, base_time), 0.0)
+
+        # 45s ahead
+        later = base_time + timedelta(seconds=45)
+        self.assertEqual(col.calculate_clock_drift(base_time, later), 45.0)
+
+        # 30s behind
+        earlier = base_time - timedelta(seconds=30)
+        self.assertEqual(col.calculate_clock_drift(base_time, earlier), 30.0)
+
+        # Timezone aware local time
+        aware_time = datetime(2026, 9, 26, 12, 1, 0, tzinfo=timezone.utc)
+        drift = col.calculate_clock_drift(base_time, aware_time)
+        self.assertEqual(drift, 60.0)
+
+    @patch("asyncio.sleep", new_callable=AsyncMock)
+    @patch("collector.collector.publish_ha_sensor")
+    def test_subsequent_cycle_skips_settings_and_display_when_in_sync(self, mock_publish, mock_sleep):
+        """Option 4: Verify periodic 60s poll skips sync-settings (no blink) and sync-display when in sync."""
+        db = col.init_db()
+
+        # Build bottle data packet with clock matching local now
+        now = col.get_local_now()
+        now_naive = now.replace(tzinfo=None) if now.tzinfo is not None else now
+        rp_bottle_data = bytearray(
+            b"\x52\x50\x00\x27\x00\x00\x58\x00\x00"
+            + bytes([now_naive.year - 2000, now_naive.month, now_naive.day, now_naive.hour, now_naive.minute, now_naive.second])
+            + b"\x00" * 16 + b"\x01" + b"\x00" * 5
+        )
+        rp_no_logs = bytes.fromhex("52500004030600")
+        rp_settings_ack = bytes.fromhex("5250000f0000000000000000")
+
+        written_labels = []
+
+        async def fake_write_and_wait(client, cmd, label, queue, wait=1.0):
+            written_labels.append(label)
+            if label == "bottle-data":
+                return [bytes(rp_bottle_data)]
+            elif label == "sync-settings":
+                return [rp_settings_ack]
+            elif label == "request-logs":
+                return [rp_no_logs]
+            return []
+
+        with patch("collector.collector.ble_write_and_wait", side_effect=fake_write_and_wait):
+            # First cycle: initial sync
+            self.run_async(col.sync_cycle(self.mock_client, self.packet_queue, db))
+            self.assertTrue(col.settings_synced)
+            self.assertEqual(col.last_synced_intake, 0)
+            self.assertIn("sync-settings", written_labels)
+            self.assertIn("sync-display", written_labels)
+
+            # Second cycle (60s later): bottle clock is accurate and intake unchanged
+            written_labels.clear()
+            self.run_async(col.sync_cycle(self.mock_client, self.packet_queue, db))
+
+            # CRITICAL VERIFICATION: sync-settings and sync-display MUST NOT BE CALLED
+            self.assertNotIn("sync-settings", written_labels, "sync-settings must be skipped when clock is in sync")
+            self.assertNotIn("sync-display", written_labels, "sync-display must be skipped when intake is unchanged")
+            self.assertEqual(written_labels, ["bottle-data", "request-logs"])
+
+        db.close()
+
+    @patch("asyncio.sleep", new_callable=AsyncMock)
+    @patch("collector.collector.publish_ha_sensor")
+    def test_sync_cycle_detects_clock_drift_and_syncs_settings(self, mock_publish, mock_sleep):
+        """Option 4: Verify sync_cycle detects clock drift > MAX_CLOCK_DRIFT_SEC and syncs settings."""
+        db = col.init_db()
+
+        # Simulate collector already synced previously
+        col.settings_synced = True
+        col.last_synced_intake = 0
+
+        # Build bottle packet with clock drifted by 10 minutes (600s > 120s threshold)
+        now = col.get_local_now()
+        now_naive = now.replace(tzinfo=None) if now.tzinfo is not None else now
+        drifted_time = now_naive - timedelta(seconds=600)
+        rp_drifted = bytearray(
+            b"\x52\x50\x00\x27\x00\x00\x58\x00\x00"
+            + bytes([drifted_time.year - 2000, drifted_time.month, drifted_time.day, drifted_time.hour, drifted_time.minute, drifted_time.second])
+            + b"\x00" * 16 + b"\x01" + b"\x00" * 5
+        )
+        rp_no_logs = bytes.fromhex("52500004030600")
+
+        written_labels = []
+
+        async def fake_write_and_wait(client, cmd, label, queue, wait=1.0):
+            written_labels.append(label)
+            if label == "bottle-data":
+                return [bytes(rp_drifted)]
+            elif label == "request-logs":
+                return [rp_no_logs]
+            return []
+
+        with patch("collector.collector.ble_write_and_wait", side_effect=fake_write_and_wait):
+            self.run_async(col.sync_cycle(self.mock_client, self.packet_queue, db))
+            self.assertIn("sync-settings", written_labels, "Clock drift must trigger sync-settings")
+
+        db.close()
+
+    @patch("asyncio.sleep", new_callable=AsyncMock)
+    @patch("collector.collector.publish_ha_sensor")
+    def test_sync_cycle_detects_uninitialized_clock_and_syncs_settings(self, mock_publish, mock_sleep):
+        """Option 4: Verify sync_cycle resyncs when bottle clock bytes are zeroed (e.g. after flat battery)."""
+        db = col.init_db()
+
+        col.settings_synced = True
+        col.last_synced_intake = 0
+
+        # Packet with 0s at clock bytes (month 0 is invalid)
+        rp_zeroed_clock = bytearray(b"\x52\x50\x00\x27\x00\x00\x58" + b"\x00" * 24 + b"\x01" + b"\x00" * 5)
+        rp_no_logs = bytes.fromhex("52500004030600")
+
+        written_labels = []
+
+        async def fake_write_and_wait(client, cmd, label, queue, wait=1.0):
+            written_labels.append(label)
+            if label == "bottle-data":
+                return [bytes(rp_zeroed_clock)]
+            elif label == "request-logs":
+                return [rp_no_logs]
+            return []
+
+        with patch("collector.collector.ble_write_and_wait", side_effect=fake_write_and_wait):
+            self.run_async(col.sync_cycle(self.mock_client, self.packet_queue, db))
+            self.assertIn("sync-settings", written_labels, "Zeroed/invalid clock must trigger sync-settings")
+
         db.close()
 
 

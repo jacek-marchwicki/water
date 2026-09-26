@@ -198,18 +198,21 @@ This is the sequence our collector follows, matching the official app:
 3. Connect (no pairing needed)
 4. Discover services, enable notifications on FFE4
 5. requestBottleData                 → write 47540001ff
-   ← RP with battery, firmware, charging status
-6. requestSyncData                   → write 505400140305{goal}0703{time}0726{reminder}
+   ← RP with battery, firmware, charging status, and bottle RTC clock (bytes 9-14)
+6. requestSyncData (Smart Sync)      → write 505400140305{goal}0703{time}0726{reminder}
+   (NOTE: Writing settings causes the bottle LED to blink blue as confirmation.
+    To avoid blinking every 60s, this is only sent on initial sync after service
+    boot, when settings are updated in UI/MQTT, or if bottle clock drift exceeds 120s)
    ← RP with sync result (byte 10 = 0x00 means success)
 7. syncTodayAmount                   → write 505400040304{amount}
-   (pushes current day total to bottle screen %)
+   (pushes current day total to bottle screen %; only sent if amount changed or on initial sync)
 8. requestWaterLogs                  → write 4754000106
    ← RP with byte 5=0x06, byte 6=0x01 if data exists
    ← PT packets with sip records (may span multiple notifications)
 9. ackWaterLogs                      → write 525000040306{totalBytes}
    (clears acked records from bottle storage)
 10. syncTodayAmount again            → write 505400040304{newTotal}
-    (updates screen with post-sync total)
+    (updates screen with post-sync total if sips were received)
 11. Wait POLL_INTERVAL, repeat from step 5
 ```
 

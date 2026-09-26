@@ -74,6 +74,13 @@ MAX_SCAN_FAILURES = 3
 MAX_EMPTY_POLLS = 5
 BACKOFF_BASE = 5
 BACKOFF_CAP = 30
+MAX_CLOCK_DRIFT_SEC = int(os.environ.get("WATERH_MAX_CLOCK_DRIFT_SEC", "120"))
+
+# Sync state tracking (Option 4: smart read-then-sync to prevent periodic LED blinking)
+settings_synced: bool = False
+last_settings_sync: datetime | None = None
+last_synced_intake: int | None = None
+
 
 
 
@@ -162,6 +169,33 @@ def get_today_sips(db, limit: int = 50) -> list[tuple]:
         f"SELECT id, timestamp, intake_ml, temp_c, tds FROM sips WHERE DATE(timestamp) = ? ORDER BY timestamp DESC LIMIT {limit}",
         (today_str,)
     ).fetchall()
+
+
+def parse_bottle_time(rp: bytes) -> datetime | None:
+    """Parse the bottle's internal RTC time from an RP bottle-data packet (bytes 9-14)."""
+    if len(rp) < 15:
+        return None
+    try:
+        year = 2000 + rp[9]
+        month = rp[10]
+        day = rp[11]
+        hour = rp[12]
+        minute = rp[13]
+        second = rp[14]
+        # Validate date and time component ranges
+        if not (2020 <= year <= 2099 and 1 <= month <= 12 and 1 <= day <= 31 and 0 <= hour <= 23 and 0 <= minute <= 59 and 0 <= second <= 59):
+            return None
+        return datetime(year, month, day, hour, minute, second)
+    except (ValueError, IndexError, TypeError):
+        return None
+
+
+def calculate_clock_drift(bottle_time: datetime, local_now: datetime | None = None) -> float:
+    """Calculate the absolute clock drift in seconds between bottle RTC and local system time."""
+    now = local_now or get_local_now()
+    now_naive = now.replace(tzinfo=None) if now.tzinfo is not None else now
+    return abs((now_naive - bottle_time).total_seconds())
+
 
 
 # --- Database & Settings Helpers ---
@@ -935,6 +969,7 @@ def serve_static_file(writer: asyncio.StreamWriter, status: int, relative_path: 
 
 async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     """Minimal HTTP handler for Web UI and /commands endpoint."""
+    global settings_synced, last_settings_sync, last_synced_intake
     try:
         request_line = await asyncio.wait_for(reader.readline(), timeout=5)
         request_str = request_line.decode(errors="replace")
@@ -980,6 +1015,9 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
                 "last_seen": get_local_now().isoformat(),
                 "bottle": BOTTLE_ADDR,
                 "timezone": os.environ.get("TZ", "UTC"),
+                "settings_synced": settings_synced,
+                "last_settings_sync": last_settings_sync.isoformat() if last_settings_sync else None,
+                "last_synced_intake": last_synced_intake,
             }
             send_json(writer, 200, resp)
 
@@ -1078,6 +1116,7 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
                 publish_ha_sensor("today_intake", total_today, unit="mL", friendly_name="WaterH Today Intake", icon="mdi:cup-water", device_class="water", state_class="total_increasing")
                 if cmd_queue:
                     cmd_queue.put_nowait((cmd_sync_today_amount(total_today), f"intake {total_today}ml"))
+                last_synced_intake = total_today
                 send_json(writer, 200, {"ok": True, "added_ml": ml, "today_total_ml": total_today})
             else:
                 send_json(writer, 400, {"error": "invalid ml"})
@@ -1101,6 +1140,7 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
             publish_ha_sensor("today_intake", total_today, unit="mL", friendly_name="WaterH Today Intake", icon="mdi:cup-water", device_class="water", state_class="total_increasing")
             if cmd_queue:
                 cmd_queue.put_nowait((cmd_sync_today_amount(total_today), f"sync-display {total_today}ml"))
+            last_synced_intake = total_today
             send_json(writer, 200, {"ok": True, "today_total_ml": total_today})
 
         elif method == "POST" and path == "/commands/reminder":
@@ -1125,6 +1165,8 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
             label = f"reminder {'on' if on else 'off'}"
             if cmd_queue:
                 cmd_queue.put_nowait((cmd, label))
+            settings_synced = True
+            last_settings_sync = get_local_now()
             send_json(writer, 200, {"ok": True, "queued": label})
 
         elif method == "POST" and path == "/commands/schedule":
@@ -1150,12 +1192,16 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
                     cmd_sync_settings(),
                     f"schedule update (wake={sched['wake_time']}, sleep={sched['sleep_time']}, int={sched['interval_min']}m, on={sched['reminder_on']})"
                 ))
+            settings_synced = True
+            last_settings_sync = get_local_now()
             send_json(writer, 200, {"ok": True, "schedule": sched, "queued": label})
 
         elif method == "POST" and path in ["/commands/time", "/commands/sync_time"]:
             now = get_local_now()
             if cmd_queue:
                 cmd_queue.put_nowait((cmd_set_time(now), f"sync time {now.strftime('%Y-%m-%d %H:%M:%S')}"))
+            settings_synced = True
+            last_settings_sync = now
             send_json(writer, 200, {"ok": True, "local_time": now.isoformat(), "queued": f"time {now.strftime('%H:%M:%S')}"})
 
 
@@ -1482,28 +1528,53 @@ async def ble_write_and_wait(client, cmd: bytes, label: str, queue: asyncio.Queu
 # --- Sync cycle ---
 
 async def sync_cycle(client, queue: asyncio.Queue, db) -> bool:
+    global settings_synced, last_settings_sync, last_synced_intake
+
     # Step 1: Request bottle data
     pkts = await ble_write_and_wait(client, cmd_bottle_data(), "bottle-data", queue, wait=2.0)
     rp_pkts = [p for p in pkts if len(p) >= 2 and p[0] == 0x52 and p[1] == 0x50]
+    bottle_clock: datetime | None = None
     if rp_pkts:
         rp = rp_pkts[0]
         if len(rp) > 31:
             log.info(f"[BLE] Battery: {rp[6]}%, charging: {rp[31]}")
             publish_ha_sensor("battery", rp[6], unit="%", friendly_name="WaterH Battery", device_class="battery")
+        bottle_clock = parse_bottle_time(rp)
     else:
         log.warning("[BLE] No bottle data response")
 
-    # Step 2: Sync settings (time + goal + reminder)
-    pkts = await ble_write_and_wait(client, cmd_sync_settings(), "sync-settings", queue, wait=2.0)
-    rp_pkts = [p for p in pkts if len(p) >= 2 and p[0] == 0x52 and p[1] == 0x50]
-    if rp_pkts:
-        rp = rp_pkts[0]
-        sync_ok = len(rp) > 10 and rp[10] == 0x00
-        log.info(f"[BLE] Settings sync: {'ok' if sync_ok else 'check response'}")
+    # Step 2: Smart Settings Sync (clock drift check or initial sync)
+    needs_settings_sync = False
+    now = get_local_now()
 
-    # Step 3: Sync today's amount to bottle display
+    if not settings_synced:
+        needs_settings_sync = True
+        log.info("[BLE] Initial settings sync required")
+    elif rp_pkts and len(rp_pkts[0]) >= 15 and bottle_clock is None:
+        # Bottle returned telemetry but clock bytes are invalid / uninitialized
+        needs_settings_sync = True
+        log.info("[BLE] Bottle clock invalid or uninitialized, syncing settings...")
+    elif bottle_clock is not None:
+        drift = calculate_clock_drift(bottle_clock, now)
+        if drift > MAX_CLOCK_DRIFT_SEC:
+            needs_settings_sync = True
+            log.info(f"[BLE] Clock drift detected ({drift:.0f}s > {MAX_CLOCK_DRIFT_SEC}s, bottle: {bottle_clock}, local: {now.strftime('%Y-%m-%d %H:%M:%S')}), syncing settings...")
+
+    if needs_settings_sync:
+        pkts = await ble_write_and_wait(client, cmd_sync_settings(), "sync-settings", queue, wait=2.0)
+        rp_pkts_settings = [p for p in pkts if len(p) >= 2 and p[0] == 0x52 and p[1] == 0x50]
+        if rp_pkts_settings:
+            rp_s = rp_pkts_settings[0]
+            sync_ok = len(rp_s) > 10 and rp_s[10] == 0x00
+            log.info(f"[BLE] Settings sync: {'ok' if sync_ok else 'check response'}")
+        settings_synced = True
+        last_settings_sync = now
+
+    # Step 3: Sync today's amount to bottle display (only if changed or first sync)
     total_today = get_today_total(db)
-    await ble_write_and_wait(client, cmd_sync_today_amount(total_today), "sync-display", queue, wait=1.0)
+    if last_synced_intake != total_today:
+        await ble_write_and_wait(client, cmd_sync_today_amount(total_today), "sync-display", queue, wait=1.0)
+        last_synced_intake = total_today
     publish_ha_sensor("today_intake", total_today, unit="mL", friendly_name="WaterH Today Intake", icon="mdi:cup-water", device_class="water", state_class="total_increasing")
     publish_ha_sensor("daily_goal", GOAL_ML, unit="mL", friendly_name="WaterH Daily Goal", icon="mdi:target-variant")
 
@@ -1545,8 +1616,10 @@ async def sync_cycle(client, queue: asyncio.Queue, db) -> bool:
         await ble_write_and_wait(client, cmd_ack_water_logs(ack_bytes), "ack-logs", queue, wait=1.0)
         log.info(f"[BLE] Acked {ack_bytes}B ({len(sips)} records)")
 
-    # Step 8: Update bottle display with new total
-    await ble_write_and_wait(client, cmd_sync_today_amount(total_today), "sync-display", queue, wait=1.0)
+    # Step 8: Update bottle display with new total (if changed)
+    if total_today != last_synced_intake:
+        await ble_write_and_wait(client, cmd_sync_today_amount(total_today), "sync-display", queue, wait=1.0)
+        last_synced_intake = total_today
 
     log_sync(db, len(sips), new_count, len(sips) * 13 if sips else 0)
     return True

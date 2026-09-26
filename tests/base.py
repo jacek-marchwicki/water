@@ -34,6 +34,9 @@ class IsolatedCollectorTestCase(unittest.TestCase):
         self._orig_write_char = col.WRITE_CHAR
         self._orig_notify_char = col.NOTIFY_CHAR
         self._orig_api_token = col.API_TOKEN
+        self._orig_settings_synced = col.settings_synced
+        self._orig_last_settings_sync = col.last_settings_sync
+        self._orig_last_synced_intake = col.last_synced_intake
 
         # Set isolated globals
         col.DB_PATH = str(self.db_path)
@@ -44,6 +47,9 @@ class IsolatedCollectorTestCase(unittest.TestCase):
         col.WRITE_CHAR = "0000ffe9-0000-1000-8000-00805f9b34fb"
         col.NOTIFY_CHAR = "0000ffe4-0000-1000-8000-00805f9b34fb"
         col.API_TOKEN = ""
+        col.settings_synced = False
+        col.last_settings_sync = None
+        col.last_synced_intake = None
 
     def tearDown(self):
         # Restore globals
@@ -55,6 +61,9 @@ class IsolatedCollectorTestCase(unittest.TestCase):
         col.WRITE_CHAR = self._orig_write_char
         col.NOTIFY_CHAR = self._orig_notify_char
         col.API_TOKEN = self._orig_api_token
+        col.settings_synced = self._orig_settings_synced
+        col.last_settings_sync = self._orig_last_settings_sync
+        col.last_synced_intake = self._orig_last_synced_intake
 
         # Clean up temporary directory
         if os.path.exists(self.temp_dir):
