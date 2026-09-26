@@ -987,8 +987,8 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
             db = init_db()
             total_today = get_today_total(db)
             rows = get_today_sips(db, limit=100)
-            sips = [{"id": r[0], "timestamp": r[1], "intake_ml": r[2], "temp_c": r[3], "tds": r[4], "raw_hex": r[5] if len(r) > 5 else None} for r in rows]
-            last_temp = rows[0][3] if rows and rows[0][3] else None
+            sips = [{"id": r[0], "timestamp": r[1], "intake_ml": r[2], "temp_c": None, "tds": r[4], "raw_hex": r[5] if len(r) > 5 else None} for r in rows]
+            last_temp = None
             resp = {
                 "total_ml": total_today,
                 "goal_ml": GOAL_ML,
