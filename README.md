@@ -81,6 +81,25 @@ research/           Reverse engineering scripts
 | `GET` | `/api/sips` | Raw sip log with pagination |
 | `GET` | `/api/status` | Collector connection state |
 
+## CLI & Diagnostic Tools
+
+- **`send_cmd.py` / `send_cmd.sh`**: Send commands (flash, LED animations, goal, OLED intake display sync, schedule, raw hex bytes) to the bottle via the add-on HTTP API.
+- **`fetch_logs.py` / `fetch_logs.sh`**: Fetch, stream, and filter logs directly from the Home Assistant add-on over SSH:
+  ```bash
+  # View recent logs
+  python3 fetch_logs.py -n 50
+
+  # Filter by severity or subsystem tag
+  python3 fetch_logs.py --level ERROR
+  python3 fetch_logs.py --tag BLE
+
+  # Stream logs live in real time
+  python3 fetch_logs.py -f
+
+  # Output structured JSON for automated AI analysis
+  python3 fetch_logs.py -n 20 --json
+  ```
+
 ## Running
 
 ### Home Assistant OS (Raspberry Pi / Add-on)

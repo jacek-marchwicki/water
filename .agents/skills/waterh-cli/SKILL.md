@@ -122,9 +122,20 @@ python3 send_cmd.py raw 47 54 00 01 ff
    `send_cmd.py` returns a JSON confirmation `{"ok": true, "queued": ...}` indicating the command was received by the add-on command queue.
 
 2. **Verifying Physical Execution in Live Logs**:
-   To observe the exact BLE GATT write event on the Raspberry Pi:
+   To inspect or stream add-on logs directly from Home Assistant:
    ```bash
-   ssh -o StrictHostKeyChecking=accept-new -p 22 root@homeassistant.local "ha apps logs local_waterh_collector" | tail -n 20
+   # Quick fetch (last 20 lines)
+   python3 fetch_logs.py -n 20
+
+   # Filter for errors or warnings
+   python3 fetch_logs.py -n 50 --level ERROR
+   python3 fetch_logs.py -n 50 --min-level WARNING
+
+   # Follow live BLE logs in real-time
+   python3 fetch_logs.py -f --tag BLE
+
+   # Structured JSON output for automated agent parsing
+   python3 fetch_logs.py -n 20 --json
    ```
    Look for lines formatted as:
    ```text
