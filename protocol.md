@@ -183,10 +183,15 @@ Offset  Size  Field
 4       1     Minute (0-59)
 5       1     Second (0-59)
 6       2     Intake in ml (big-endian)
-8       2     TDS / water quality (big-endian)
-10      2     Temperature in °C × 10 (big-endian)
-12      1     Padding / alignment
+8       2     TDS / water quality (big-endian, 00 00 on Boost)
+10      1     Status / tag (0x01)
+11      1     Battery percentage at sip time (0-100%)
+12      1     Padding / alignment (0x00)
 ```
+
+> [!NOTE]
+> **Temperature vs. Battery in WaterH Boost:**
+> The WaterH Boost model (`00 27`) does not feature a water temperature sensor probe (temperature monitoring is exclusive to the Vita model `00 31`). In early reverse-engineering, bytes 10-11 of the 13-byte sip record were mistakenly interpreted as a 16-bit big-endian temperature integer `((rec[10] << 8) | rec[11]) / 10.0`. Because byte 10 is fixed at `0x01` and byte 11 is the bottle battery percentage (`0-100%`), that formula evaluated to `25.6 + (battery % / 10.0)`. For a 95% charged bottle, this produced `(256 + 95) / 10 = 35.1°C`. Byte 11 is now correctly documented as battery percentage at sip time.
 
 ## Full Sync Flow
 
@@ -272,7 +277,7 @@ Data reported via RT update packets during connection:
 
 | Sensor | RT byte 5 | Data | Notes |
 |---|---|---|---|
-| Temperature | `01` | byte 6 = °C | Water temperature |
+| Temperature | `01` | byte 6 = °C | Water temperature (Vita model only; unsupported on Boost) |
 | Battery | `02` | byte 6 = % | 0-100 |
 | Volume | `08` | bytes 6-7 | Water level (big-endian) |
 | Charging | `17` | byte 6 | 1 or 2 = charging |

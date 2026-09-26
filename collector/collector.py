@@ -167,7 +167,7 @@ def get_today_total(db) -> int:
 def get_today_sips(db, limit: int = 50) -> list[tuple]:
     today_str = get_today_str()
     return db.execute(
-        f"SELECT id, timestamp, intake_ml, temp_c, tds FROM sips WHERE DATE(timestamp) = ? ORDER BY timestamp DESC LIMIT {limit}",
+        f"SELECT id, timestamp, intake_ml, temp_c, tds, raw_hex FROM sips WHERE DATE(timestamp) = ? ORDER BY timestamp DESC LIMIT {limit}",
         (today_str,)
     ).fetchall()
 
@@ -639,15 +639,6 @@ class HAConnection:
                 "state_class": "measurement",
                 "device": device_info,
             }),
-            ("sensor", "temperature", {
-                "name": "WaterH Water Temperature",
-                "unique_id": "waterh_temperature",
-                "state_topic": "waterh/sensor/temperature/state",
-                "unit_of_measurement": "°C",
-                "device_class": "temperature",
-                "state_class": "measurement",
-                "device": device_info,
-            }),
             ("sensor", "tds", {
                 "name": "WaterH Water Quality (TDS)",
                 "unique_id": "waterh_tds",
@@ -1012,8 +1003,8 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
             db = init_db()
             total_today = get_today_total(db)
             rows = get_today_sips(db, limit=100)
-            sips = [{"id": r[0], "timestamp": r[1], "intake_ml": r[2], "temp_c": r[3], "tds": r[4]} for r in rows]
-            last_temp = rows[0][3] if rows and rows[0][3] else None
+            sips = [{"id": r[0], "timestamp": r[1], "intake_ml": r[2], "temp_c": None, "tds": r[4], "raw_hex": r[5] if len(r) > 5 else None} for r in rows]
+            last_temp = None
             resp = {
                 "total_ml": total_today,
                 "goal_ml": GOAL_ML,
@@ -1067,9 +1058,9 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
             db = init_db()
             total_today = get_today_total(db)
             rows = db.execute(
-                "SELECT id, timestamp, intake_ml, temp_c, tds FROM sips ORDER BY timestamp DESC LIMIT 50"
+                "SELECT id, timestamp, intake_ml, temp_c, tds, raw_hex FROM sips ORDER BY timestamp DESC LIMIT 50"
             ).fetchall()
-            sips = [{"id": r[0], "timestamp": r[1], "intake_ml": r[2], "temp_c": r[3], "tds": r[4]} for r in rows]
+            sips = [{"id": r[0], "timestamp": r[1], "intake_ml": r[2], "temp_c": r[3], "tds": r[4], "raw_hex": r[5] if len(r) > 5 else None} for r in rows]
             resp = {
                 "bottle": BOTTLE_ADDR,
                 "today_ml": total_today,
@@ -1416,14 +1407,17 @@ def parse_pt_packets(packets: list[bytes]) -> tuple[list[dict], int]:
         hour, minute, second = rec[3], rec[4], rec[5]
         intake_ml = (rec[6] << 8) | rec[7]
         tds = (rec[8] << 8) | rec[9]
-        temp_c = ((rec[10] << 8) | rec[11]) / 10.0
+        # Byte 10 is a fixed status/tag byte (0x01) and Byte 11 is the bottle battery % (0-100)
+        # at the time of the sip. WaterH Boost (model 00 27) does not have a water temperature probe.
+        battery = rec[11]
+        temp_c = None
         try:
             ts = datetime(year, month, day, hour, minute, second).isoformat()
         except ValueError:
             ts = f"{year}-{month:02d}-{day:02d}T{hour:02d}:{minute:02d}:{second:02d}"
         records.append({
             "timestamp": ts, "intake_ml": intake_ml,
-            "temp_c": temp_c, "tds": tds, "raw": rec.hex(" "),
+            "temp_c": temp_c, "battery": battery, "tds": tds, "raw": rec.hex(" "),
         })
     return records, len(pt_payload)
 
@@ -1627,7 +1621,8 @@ async def sync_cycle(client, queue: asyncio.Queue, db) -> bool:
     publish_ha_sensor("today_intake", total_today, unit="mL", friendly_name="WaterH Today Intake", icon="mdi:cup-water", device_class="water", state_class="total_increasing")
     if sips:
         latest = sips[-1]
-        publish_ha_sensor("temperature", latest["temp_c"], unit="°C", friendly_name="WaterH Water Temperature", device_class="temperature")
+        if latest.get("temp_c") is not None:
+            publish_ha_sensor("temperature", latest["temp_c"], unit="°C", friendly_name="WaterH Water Temperature", device_class="temperature")
         publish_ha_sensor("tds", latest["tds"], unit="ppm", friendly_name="WaterH Water Quality (TDS)", icon="mdi:water-check")
 
     # Step 7: Ack + clear from bottle

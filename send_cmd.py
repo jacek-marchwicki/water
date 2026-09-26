@@ -67,7 +67,8 @@ def cmd_status(base_url: str):
 
     print(f"  Today Intake: {total_ml} mL ({pct}%) [{bar}]")
     print(f"  Total Sips:   {sips_count}")
-    print(f"  Temperature:  {temp_str}")
+    if temp is not None:
+        print(f"  Temperature:  {temp}°C")
     print("-" * 50)
 
     sips = today.get("sips", [])
