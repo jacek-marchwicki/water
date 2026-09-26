@@ -14,14 +14,15 @@ class TestPacketParsing(IsolatedCollectorTestCase):
         # Header (6 bytes): 'PT' (2B) + len (2B) + count (1B) + echo (1B)
         header = bytes.fromhex("5054000d0d06")
         # Record (13 bytes):
-        # 2026-09-23 15:45:12, intake=300ml, tds=72ppm, temp=22.0C (220), padding=0
+        # 2026-09-23 15:45:12, intake=300ml, tds=72ppm, status=0x01, battery=95% (0x5f), padding=0
         # Year: 2026 - 2000 = 26 (0x1a)
         # Month: 09 (0x09), Day: 23 (0x17), Hour: 15 (0x0f), Min: 45 (0x2d), Sec: 12 (0x0c)
         # Intake: 300 = 0x012c
         # TDS: 72 = 0x0048
-        # Temp: 220 = 0x00dc
+        # Status/Tag: 0x01
+        # Battery: 95% = 0x5f
         # Padding: 0x00
-        rec = bytes.fromhex("1a09170f2d0c012c004800dc00")
+        rec = bytes.fromhex("1a09170f2d0c012c0048015f00")
         pkt = header + rec
 
         records, pt_bytes = parse_pt_packets([pkt])
@@ -32,14 +33,15 @@ class TestPacketParsing(IsolatedCollectorTestCase):
         self.assertEqual(sip["timestamp"], "2026-09-23T15:45:12")
         self.assertEqual(sip["intake_ml"], 300)
         self.assertEqual(sip["tds"], 72)
-        self.assertAlmostEqual(sip["temp_c"], 22.0)
-        self.assertEqual(sip["raw"], "1a 09 17 0f 2d 0c 01 2c 00 48 00 dc 00")
+        self.assertIsNone(sip["temp_c"])
+        self.assertEqual(sip["battery"], 95)
+        self.assertEqual(sip["raw"], "1a 09 17 0f 2d 0c 01 2c 00 48 01 5f 00")
 
     def test_multiple_records_in_single_packet(self):
         """Verify parsing multiple 13-byte records in one PT packet."""
         header = bytes.fromhex("5054001a1a06")
-        rec1 = bytes.fromhex("1a09170a000000c8003200be00")  # 200ml, 50tds, 19.0C
-        rec2 = bytes.fromhex("1a09170c1e00015e003700c800")  # 350ml, 55tds, 20.0C
+        rec1 = bytes.fromhex("1a09170a000000c80032015a00")  # 200ml, 50tds, battery 90%
+        rec2 = bytes.fromhex("1a09170c1e00015e0037015500")  # 350ml, 55tds, battery 85%
         pkt = header + rec1 + rec2
 
         records, pt_bytes = parse_pt_packets([pkt])
@@ -48,10 +50,12 @@ class TestPacketParsing(IsolatedCollectorTestCase):
         self.assertEqual(len(records), 2)
         self.assertEqual(records[0]["intake_ml"], 200)
         self.assertEqual(records[0]["tds"], 50)
-        self.assertAlmostEqual(records[0]["temp_c"], 19.0)
+        self.assertIsNone(records[0]["temp_c"])
+        self.assertEqual(records[0]["battery"], 90)
         self.assertEqual(records[1]["intake_ml"], 350)
         self.assertEqual(records[1]["tds"], 55)
-        self.assertAlmostEqual(records[1]["temp_c"], 20.0)
+        self.assertIsNone(records[1]["temp_c"])
+        self.assertEqual(records[1]["battery"], 85)
 
     def test_multi_packet_continuation_stream(self):
         """Verify parsing stream with initial PT packet followed by continuation packets."""

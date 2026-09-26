@@ -100,11 +100,11 @@ class TestSyncCycle(IsolatedCollectorTestCase):
         self.assertEqual(len(sips), 1)
         self.assertEqual(sips[0][0], 300)
         self.assertEqual(sips[0][1], 65)
-        self.assertAlmostEqual(sips[0][2], 21.0)
+        self.assertIsNone(sips[0][2])
 
-        # Verify HA sensors published for temperature and tds
-        mock_publish.assert_any_call("temperature", 21.0, unit="°C", friendly_name="WaterH Water Temperature", device_class="temperature")
+        # Verify HA sensors published for tds but not false temperature
         mock_publish.assert_any_call("tds", 65, unit="ppm", friendly_name="WaterH Water Quality (TDS)", icon="mdi:water-check")
+        self.assertFalse(any(call[0][0] == "temperature" for call in mock_publish.call_args_list))
 
         # Verify ack command written with 13 bytes (1 sip * 13)
         ack_labels = [label for cmd, label in written_commands if label == "ack-logs"]

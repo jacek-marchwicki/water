@@ -106,10 +106,11 @@ class TestHAConnection(IsolatedCollectorTestCase):
 
         conn.publish_discovery()
 
-        # Should publish configs for: today_intake, battery, temperature, tds, daily_goal, status, flash_led, recalibrate, sync_time, led_mode, set_goal, wake_time, sleep_time, reminder_interval, reminder
-        self.assertEqual(conn.client.publish.call_count, 22)  # 15 configs + 7 baseline states
+        # Should publish configs for: today_intake, battery, tds, daily_goal, status, flash_led, recalibrate, sync_time, led_mode, set_goal, wake_time, sleep_time, reminder_interval, reminder
+        self.assertEqual(conn.client.publish.call_count, 21)  # 14 configs + 7 baseline states
 
         published_topics = [c[0][0] for c in conn.client.publish.call_args_list]
+        self.assertNotIn("homeassistant/sensor/waterh/temperature/config", published_topics)
         self.assertIn("homeassistant/sensor/waterh/today_intake/config", published_topics)
         self.assertIn("homeassistant/sensor/waterh/battery/config", published_topics)
         self.assertIn("homeassistant/button/waterh/flash_led/config", published_topics)

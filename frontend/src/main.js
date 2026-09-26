@@ -105,18 +105,15 @@ async function loadToday() {
     const mlEl = document.getElementById("today-ml");
     const sipsEl = document.getElementById("today-sips");
     const pctEl = document.getElementById("today-pct");
-    const tempEl = document.getElementById("today-temp");
 
     if (firstLoad) {
       mlEl.textContent = data.total_ml;
       sipsEl.textContent = data.sip_count;
       pctEl.textContent = data.goal_pct;
-      tempEl.textContent = data.last_temp_c != null ? data.last_temp_c : "—";
     } else {
       animateValue(mlEl, String(data.total_ml));
       animateValue(sipsEl, String(data.sip_count));
       animateValue(pctEl, String(data.goal_pct));
-      animateValue(tempEl, data.last_temp_c != null ? String(data.last_temp_c) : "—");
     }
 
     document.getElementById("today-bar").style.width = `${data.goal_pct}%`;
@@ -133,7 +130,7 @@ async function loadToday() {
     if (sipKey !== lastSipKey) {
       lastSipKey = sipKey;
       if (data.sips.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="4" class="empty-state">no sips recorded yet today</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="3" class="empty-state">no sips recorded yet today</td></tr>`;
       } else {
         const reversed = data.sips.slice().reverse();
         tbody.innerHTML = reversed
@@ -142,7 +139,6 @@ async function loadToday() {
             return `<tr class="animate-in" style="animation-delay:${i * 0.03}s">
               <td>${t}</td>
               <td>${s.intake_ml} ml</td>
-              <td>${s.temp_c ?? "—"}°C</td>
               <td><button class="delete-btn" onclick="deleteSip(${s.id}, '${s.timestamp}')">🗑️ Delete</button></td>
             </tr>`;
           })
@@ -156,7 +152,7 @@ async function loadToday() {
     hideSkeleton();
     if (firstLoad) {
       document.getElementById("sip-table").innerHTML =
-        `<tr><td colspan="4" class="error-state">failed to load — retrying</td></tr>`;
+        `<tr><td colspan="3" class="error-state">failed to load — retrying</td></tr>`;
     }
   }
 }
