@@ -12,3 +12,5 @@ waterh-collector/collector/
 waterh-collector/frontend/
 /.idea
 
+# Git worktrees
+.worktrees/
