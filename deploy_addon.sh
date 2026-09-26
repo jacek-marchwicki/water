@@ -16,16 +16,15 @@ echo " SSH Port:    ${HA_PORT}"
 echo " Destination: ${DEST_DIR}"
 echo "------------------------------------------"
 
-# Sync single source of truth collector.py and frontend directory
-echo "--> Syncing single-source-of-truth collector.py & frontend directory..."
-mkdir -p "$SCRIPT_DIR/waterh-collector/collector"
-cp "$SCRIPT_DIR/collector/collector.py" "$SCRIPT_DIR/waterh-collector/collector/collector.py"
-rm -rf "$SCRIPT_DIR/waterh-collector/frontend"
-cp -r "$SCRIPT_DIR/frontend" "$SCRIPT_DIR/waterh-collector/frontend"
+# Clean up any legacy duplicate copies in waterh-collector if they exist
+rm -rf "$SCRIPT_DIR/waterh-collector/collector" "$SCRIPT_DIR/waterh-collector/frontend"
 
-echo "--> Copying add-on files via tar stream over SSH..."
+echo "--> Copying add-on files via tar stream over SSH (no local file duplication)..."
 ssh -p "${HA_PORT}" "${HA_HOST}" "mkdir -p '${DEST_DIR}' /local_apps/waterh-collector"
-tar -czf - -C "$SCRIPT_DIR/waterh-collector" . | ssh -p "${HA_PORT}" "${HA_HOST}" "tar -xzf - -C '${DEST_DIR}' && cp -r '${DEST_DIR}/.' /local_apps/waterh-collector/"
+tar --exclude='__pycache__' --exclude='*.pyc' --exclude='node_modules' --exclude='.git' -czf - \
+    -C "$SCRIPT_DIR/waterh-collector" . \
+    -C "$SCRIPT_DIR" collector frontend \
+| ssh -p "${HA_PORT}" "${HA_HOST}" "tar -xzf - -C '${DEST_DIR}' && cp -r '${DEST_DIR}/.' /local_apps/waterh-collector/"
 
 echo "------------------------------------------"
 echo "✔ Copy completed successfully!"

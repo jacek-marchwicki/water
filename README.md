@@ -41,14 +41,21 @@ See [protocol.md](protocol.md) for the complete command reference, response form
 
 ```
 collector/          BLE polling service (runs on local host)
-  collector.py      Full app-protocol sync, parse, push to API
+  collector.py      Full app-protocol sync, parse, push to API (single source of truth)
   waterh.service    systemd unit
+
+waterh-collector/   Home Assistant OS add-on definition
+  config.yaml       Add-on configuration and options schema
+  Dockerfile        Add-on container build definition
+  run.sh            Entrypoint and runtime launcher
+
+deploy_addon.sh     SSH deployment script packaging add-on directly to Home Assistant
 
 server/             API + dashboard (deployed via Coolify)
   server.py         FastAPI endpoints
   Dockerfile
 
-frontend/           Dashboard SPA
+frontend/           Dashboard SPA (single source of truth for web assets)
   src/main.js       Vanilla JS + Chart.js
   index.html
   Dockerfile        nginx serving static build
@@ -78,9 +85,28 @@ research/           Reverse engineering scripts
 
 ### Home Assistant OS (Raspberry Pi / Add-on)
 
-The collector includes native **Home Assistant MQTT Auto-Discovery** support and can be installed directly as a Home Assistant OS Add-on!
+The collector includes native **Home Assistant MQTT Auto-Discovery** support and can be deployed directly as a Home Assistant OS Add-on!
 
-1. Copy the `waterh-collector` directory into your Home Assistant `/addons/` folder (or add this GitHub repository under **Add-on Store -> Repositories**).
+#### Deployment via SSH (Recommended)
+
+From the repository root, run:
+
+```bash
+./deploy_addon.sh
+```
+
+Or with custom host/port:
+
+```bash
+HA_HOST="root@homeassistant.local" HA_PORT=22 ./deploy_addon.sh
+```
+
+This script dynamically packages `waterh-collector/`, `collector/collector.py`, and `frontend/` over SSH via a multi-directory `tar` stream directly to `/addons/waterh-collector/` on Home Assistant. It eliminates local file duplication (no manual `cp` commands required), reloads the Supervisor store, and restarts/rebuilds the add-on.
+
+#### Manual Installation
+
+If installing manually on Home Assistant without `deploy_addon.sh`:
+1. Copy `waterh-collector/` into your Home Assistant `/addons/waterh-collector` folder, ensuring `collector/` and `frontend/` directories are included alongside it.
 2. Go to **Settings -> Add-ons -> Add-on Store -> Check for new add-ons**.
 3. Select **WaterH Smart Bottle Collector** under Local Add-ons.
 4. Configure your bottle's Bluetooth MAC address (`bottle_address`) and click **Start**.

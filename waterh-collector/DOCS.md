@@ -50,7 +50,7 @@ You can easily locate your WaterH bottle's Bluetooth MAC address:
 
 ## 📋 Installation Steps
 
-1. Copy the `waterh-collector` directory into your Home Assistant `/addons/` folder (or deploy via `./deploy_addon.sh`).
+1. Deploy via `./deploy_addon.sh` from the repository root (which automatically bundles `collector/` and `frontend/` without duplication), or copy `waterh-collector/` along with `collector/` and `frontend/` into `/addons/waterh-collector`.
 2. Go to **Settings -> Add-ons -> Add-on Store**.
 3. Click the **⋮ (Menu)** in the top-right corner -> **Check for new add-ons**.
 4. Scroll down to **Local Add-ons** and select **WaterH Smart Bottle Collector**.

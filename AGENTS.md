@@ -25,9 +25,16 @@ Operational guidelines for AI agents working in this repository.
 
 ## Project Structure
 
-- `collector/`: Core BLE polling service, local SQLite storage, MQTT discovery/reporting, and embedded HTTP command server.
+- `collector/`: Core BLE polling service, local SQLite storage, MQTT discovery/reporting, and embedded HTTP command server. Single source of truth for the collector service (`collector/collector.py`).
 - `waterh-collector/`: Home Assistant OS add-on definition (`Dockerfile`, `config.yaml`, `run.sh`).
+- `deploy_addon.sh`: SSH deployment script that packages the add-on directly to Home Assistant.
 - `tests/`: Unit test suite (100% offline, mocked).
-- `frontend/`: Dashboard single-page application.
+- `frontend/`: Dashboard single-page application (single source of truth for web assets).
 - `server/`: Remote API server (FastAPI + SQLite).
 - `protocol.md`: Decompiled GATT specifications, packet layouts, and command reference.
+
+## Code Duplication & Single Source of Truth
+
+- **Single Source of Truth:** `collector/collector.py` and `frontend/` are the canonical sources.
+- **No Duplicate Files in `waterh-collector/`:** Never copy or commit `collector.py` into `waterh-collector/collector/` or `frontend/` into `waterh-collector/frontend/`. Both directories are ignored in `.gitignore` and must not exist in git or the local repository.
+- **Add-on Packaging:** `./deploy_addon.sh` uses multi-directory `tar` streaming to package `waterh-collector/`, `collector/`, and `frontend/` directly to Home Assistant over SSH. No manual `cp` or preparatory sync steps are required.

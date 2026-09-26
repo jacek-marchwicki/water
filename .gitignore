@@ -7,6 +7,7 @@ __pycache__/
 .venv/
 .coverage
 .pytest_cache/
+# Add-on build directories (never duplicate source code into waterh-collector/)
 waterh-collector/collector/
 waterh-collector/frontend/
 /.idea
