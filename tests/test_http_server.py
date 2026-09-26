@@ -143,6 +143,29 @@ class TestHttpServer(IsolatedCollectorTestCase):
         self.assertEqual(data["state"], "connected")
         self.assertTrue(data["online"])
         self.assertEqual(data["bottle"], col.BOTTLE_ADDR)
+        self.assertIn("last_seen", data)
+        self.assertIsNotNone(data["last_seen"])
+
+    def test_get_api_status_with_explicit_last_seen(self):
+        """Verify GET /api/status returns the explicit last_seen time when recorded."""
+        from datetime import datetime, timezone
+        fake_time = datetime(2026, 9, 26, 21, 30, 0, tzinfo=timezone.utc)
+        col.last_seen = fake_time
+        status_code, data, _ = self.run_async(self._send_request("GET", "/api/status"))
+        self.assertEqual(status_code, 200)
+        self.assertEqual(data["last_seen"], fake_time.isoformat())
+
+    def test_get_api_status_last_seen_from_sync_history(self):
+        """Verify GET /api/status falls back to sync history when last_seen is None."""
+        db = col.init_db()
+        db.execute("INSERT INTO syncs (timestamp, sip_count, new_count, acked_bytes) VALUES ('2026-09-26T20:15:00+02:00', 0, 0, 0)")
+        db.commit()
+        db.close()
+        col.last_seen = None
+
+        status_code, data, _ = self.run_async(self._send_request("GET", "/api/status"))
+        self.assertEqual(status_code, 200)
+        self.assertEqual(data["last_seen"], "2026-09-26T20:15:00+02:00")
 
     def test_get_commands_list(self):
         """Verify GET /commands returns supported command documentation."""

@@ -301,6 +301,27 @@ class TestSyncCycle(IsolatedCollectorTestCase):
 
         db.close()
 
+    @patch("asyncio.sleep", new_callable=AsyncMock)
+    @patch("collector.collector.publish_ha_sensor")
+    def test_sync_cycle_updates_last_seen(self, mock_publish, mock_sleep):
+        """Verify sync_cycle records col.last_seen upon successful completion."""
+        db = col.init_db()
+        col.last_seen = None
+        rp_no_logs = bytes.fromhex("52500004030600")
+
+        async def fake_write(client, cmd, label, queue, wait=1.0):
+            if label == "bottle-data":
+                return [b"\x52\x50\x00\x07\x00\x00\x55\x00\x00\x1a\x09\x1a\x0c\x00\x00\x00"]
+            elif label == "request-logs":
+                return [rp_no_logs]
+            return []
+
+        with patch("collector.collector.ble_write_and_wait", side_effect=fake_write):
+            self.run_async(col.sync_cycle(self.mock_client, self.packet_queue, db))
+            self.assertIsNotNone(col.last_seen)
+        db.close()
+
 
 if __name__ == "__main__":
     unittest.main()
+

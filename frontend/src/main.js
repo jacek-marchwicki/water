@@ -3,18 +3,6 @@ const POLL_INTERVAL = 10000;
 let pollTimer = null;
 let currentGoal = 1800;
 
-// --- Navigation ---
-document.querySelectorAll(".nav-btn").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".nav-btn").forEach((b) => b.classList.remove("active"));
-    document.querySelectorAll(".page").forEach((p) => p.classList.remove("active"));
-    btn.classList.add("active");
-    document.getElementById(`page-${btn.dataset.page}`).classList.add("active");
-
-    if (btn.dataset.page === "history") loadHistory();
-  });
-});
-
 // --- Visibility-based polling ---
 function startPolling() {
   stopPolling();
@@ -28,14 +16,28 @@ function stopPolling() {
   }
 }
 
-document.addEventListener("visibilitychange", () => {
-  if (document.hidden) {
-    stopPolling();
-  } else {
-    loadToday();
-    startPolling();
-  }
-});
+// --- Navigation & Listeners ---
+if (typeof document !== "undefined") {
+  document.querySelectorAll(".nav-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".nav-btn").forEach((b) => b.classList.remove("active"));
+      document.querySelectorAll(".page").forEach((p) => p.classList.remove("active"));
+      btn.classList.add("active");
+      document.getElementById(`page-${btn.dataset.page}`).classList.add("active");
+
+      if (btn.dataset.page === "history") loadHistory();
+    });
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      stopPolling();
+    } else {
+      loadToday();
+      startPolling();
+    }
+  });
+}
 
 // --- Loading helpers ---
 function showSkeleton() {
@@ -88,18 +90,19 @@ async function loadToday() {
     if (!scheduleLoaded) loadSchedule();
 
     const el = document.getElementById("status");
+    const ago = timeAgo(status.last_seen);
     if (status.state === "connected") {
       el.className = "status online";
-      el.textContent = `connected — ${timeAgo(status.last_seen)}`;
+      el.textContent = ago && ago !== "never" ? `connected — ${ago}` : "connected";
     } else if (status.state === "scanning") {
       el.className = "status online";
-      el.textContent = `scanning — ${status.detail || timeAgo(status.last_seen)}`;
+      el.textContent = `scanning — ${status.detail || (ago !== "never" ? ago : "searching")}`;
     } else if (status.online) {
       el.className = "status online";
-      el.textContent = `synced ${timeAgo(status.last_seen)}`;
+      el.textContent = ago && ago !== "never" ? `synced ${ago}` : "synced";
     } else {
       el.className = "status offline";
-      el.textContent = `offline — ${status.state || "unknown"} ${timeAgo(status.last_seen)}`;
+      el.textContent = `offline — ${status.state || "unknown"}${ago && ago !== "never" ? ` (${ago})` : ""}`;
     }
 
     const mlEl = document.getElementById("today-ml");
@@ -138,7 +141,8 @@ async function loadToday() {
         const reversed = data.sips.slice().reverse();
         tbody.innerHTML = reversed
           .map((s, i) => {
-            const t = new Date(s.timestamp).toLocaleTimeString();
+            const d = parseDate(s.timestamp);
+            const t = d ? d.toLocaleTimeString() : s.timestamp;
             return `<tr class="animate-in" style="animation-delay:${i * 0.03}s">
               <td>${t}</td>
               <td>${s.intake_ml} ml</td>
@@ -196,7 +200,11 @@ async function loadHistory() {
       type: "bar",
       data: {
         labels: last30.map((d) => {
-          const dt = new Date(d.date);
+          if (d.date && typeof d.date === "string" && d.date.includes("-")) {
+            const parts = d.date.split("-");
+            if (parts.length === 3) return `${Number(parts[1])}/${Number(parts[2])}`;
+          }
+          const dt = parseDate(d.date) || new Date(d.date);
           return `${dt.getMonth() + 1}/${dt.getDate()}`;
         }),
         datasets: [
@@ -302,7 +310,10 @@ function buildHeatmap(days, goal = currentGoal || 1800) {
   const cells = [];
   const cursor2 = new Date(start);
   while (cursor2 <= end) {
-    const key = cursor2.toISOString().slice(0, 10);
+    const y = cursor2.getFullYear();
+    const m = String(cursor2.getMonth() + 1).padStart(2, "0");
+    const dt = String(cursor2.getDate()).padStart(2, "0");
+    const key = `${y}-${m}-${dt}`;
     const ml = dayMap[key] || 0;
     let level = "";
     if (ml > 0 && ml < goal * 0.4) level = "l1";
@@ -332,9 +343,45 @@ function buildHeatmap(days, goal = currentGoal || 1800) {
 }
 
 // --- Utils ---
+function parseDate(iso) {
+  if (!iso) return null;
+  if (iso instanceof Date) return isNaN(iso.getTime()) ? null : iso;
+  if (typeof iso === "number") {
+    const d = new Date(iso);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  const s = String(iso).trim();
+  if (!s || s === "null" || s === "undefined") return null;
+
+  // Numeric timestamp in seconds or milliseconds
+  if (/^\d{10,13}$/.test(s)) {
+    const ms = s.length === 10 ? Number(s) * 1000 : Number(s);
+    const d = new Date(ms);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  // If already contains timezone indicator (Z, +HH:MM, -HH:MM, +HHMM, -HHMM)
+  if (/(?:Z|[+-]\d{2}(?::?\d{2})?)$/i.test(s)) {
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) return d;
+  }
+
+  // SQLite UTC format "YYYY-MM-DD HH:MM:SS" or naive ISO format
+  const normalized = s.replace(" ", "T");
+  const utcDate = new Date(normalized + "Z");
+  if (!isNaN(utcDate.getTime())) return utcDate;
+
+  const directDate = new Date(s);
+  if (!isNaN(directDate.getTime())) return directDate;
+
+  return null;
+}
+
 function timeAgo(iso) {
-  if (!iso) return "never";
-  const diff = (Date.now() - new Date(iso + "Z").getTime()) / 1000;
+  const d = parseDate(iso);
+  if (!d) return "never";
+  const diff = Math.max(0, (Date.now() - d.getTime()) / 1000);
+  if (isNaN(diff)) return "never";
   if (diff < 60) return "just now";
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
@@ -342,16 +389,20 @@ function timeAgo(iso) {
 }
 
 // --- Init ---
-loadToday();
-startPolling();
+if (typeof window !== "undefined" && typeof document !== "undefined") {
+  loadToday();
+  startPolling();
+}
 
 // --- Interactive Actions ---
-window.updateSliderText = function(val) {
-  const el = document.getElementById("slider-val");
+const root = typeof window !== "undefined" ? window : globalThis;
+
+root.updateSliderText = function(val) {
+  const el = typeof document !== "undefined" ? document.getElementById("slider-val") : null;
   if (el) el.innerText = val;
 };
 
-window.logSip = async function(ml) {
+root.logSip = async function(ml) {
   try {
     const res = await fetch("./commands/intake", {
       method: "POST",
@@ -362,7 +413,7 @@ window.logSip = async function(ml) {
     if (data.ok) {
       historyLoaded = false;
       loadToday();
-      if (document.getElementById("page-history")?.classList.contains("active")) {
+      if (typeof document !== "undefined" && document.getElementById("page-history")?.classList.contains("active")) {
         loadHistory();
       }
     }
@@ -371,13 +422,14 @@ window.logSip = async function(ml) {
   }
 };
 
-window.logCustomSip = async function() {
-  const val = parseInt(document.getElementById("custom-slider").value);
-  await window.logSip(val);
+root.logCustomSip = async function() {
+  const input = typeof document !== "undefined" ? document.getElementById("custom-slider") : null;
+  const val = input ? parseInt(input.value) : 0;
+  await root.logSip(val);
 };
 
-window.deleteSip = async function(id, timestamp) {
-  if (!confirm("Are you sure you want to delete this sip entry? It will update Home Assistant and subtract the amount from your physical bottle display.")) return;
+root.deleteSip = async function(id, timestamp) {
+  if (typeof confirm !== "undefined" && !confirm("Are you sure you want to delete this sip entry? It will update Home Assistant and subtract the amount from your physical bottle display.")) return;
   try {
     const res = await fetch("./commands/delete_sip", {
       method: "POST",
@@ -388,7 +440,7 @@ window.deleteSip = async function(id, timestamp) {
     if (data.ok) {
       historyLoaded = false;
       loadToday();
-      if (document.getElementById("page-history")?.classList.contains("active")) {
+      if (typeof document !== "undefined" && document.getElementById("page-history")?.classList.contains("active")) {
         loadHistory();
       }
     }
@@ -397,20 +449,20 @@ window.deleteSip = async function(id, timestamp) {
   }
 };
 
-window.flashLED = async function() {
+root.flashLED = async function() {
   await fetch("./commands/flash", { method: "POST" });
-  alert("Flash command queued!");
+  if (typeof alert !== "undefined") alert("Flash command queued!");
 };
 
-window.setLED = async function() {
-  const mode = document.getElementById("led-select").value;
+root.setLED = async function() {
+  const mode = typeof document !== "undefined" ? document.getElementById("led-select")?.value : "breathe";
   await fetch("./commands/led", { method: "POST", body: JSON.stringify({ mode: mode, color: "blue" }) });
 };
 
-window.setGoal = async function(ml) {
+root.setGoal = async function(ml) {
   try {
     currentGoal = Number(ml);
-    const displayEl = document.getElementById("display-goal");
+    const displayEl = typeof document !== "undefined" ? document.getElementById("display-goal") : null;
     if (displayEl) displayEl.innerText = ml;
     historyLoaded = false;
 
@@ -423,7 +475,7 @@ window.setGoal = async function(ml) {
     if (data.ok) {
       if (data.goal_ml) currentGoal = Number(data.goal_ml);
       loadToday();
-      if (document.getElementById("page-history")?.classList.contains("active")) {
+      if (typeof document !== "undefined" && document.getElementById("page-history")?.classList.contains("active")) {
         loadHistory();
       }
     }
@@ -432,19 +484,19 @@ window.setGoal = async function(ml) {
   }
 };
 
-window.promptCustomGoal = async function() {
-  const curr = document.getElementById("display-goal")?.innerText || "1800";
-  const val = prompt("Enter daily hydration goal in mL:", curr);
+root.promptCustomGoal = async function() {
+  const curr = typeof document !== "undefined" ? document.getElementById("display-goal")?.innerText || "1800" : "1800";
+  const val = typeof prompt !== "undefined" ? prompt("Enter daily hydration goal in mL:", curr) : null;
   if (val && !isNaN(val) && parseInt(val) > 0) {
-    await window.setGoal(parseInt(val));
+    await root.setGoal(parseInt(val));
   }
 };
 
 // --- Active Day Schedule & Reminders ---
 let scheduleLoaded = false;
 
-window.updateToggleText = function(checked) {
-  const lbl = document.getElementById("sched-toggle-label");
+root.updateToggleText = function(checked) {
+  const lbl = typeof document !== "undefined" ? document.getElementById("sched-toggle-label") : null;
   if (lbl) {
     lbl.textContent = checked ? "Reminders On" : "Reminders Off";
     lbl.style.color = checked ? "var(--accent)" : "var(--text-dim)";
@@ -458,6 +510,7 @@ async function loadSchedule() {
     const data = await res.json();
     scheduleLoaded = true;
 
+    if (typeof document === "undefined") return;
     const wakeInput = document.getElementById("sched-wake-input");
     const sleepInput = document.getElementById("sched-sleep-input");
     const intervalSelect = document.getElementById("sched-interval-select");
@@ -468,7 +521,7 @@ async function loadSchedule() {
     if (intervalSelect && data.interval_min) intervalSelect.value = String(data.interval_min);
     if (toggle) {
       toggle.checked = Boolean(data.reminder_on);
-      window.updateToggleText(toggle.checked);
+      root.updateToggleText(toggle.checked);
     }
   } catch (e) {
     console.error("Failed to load schedule:", e);
@@ -476,7 +529,7 @@ async function loadSchedule() {
 }
 
 function showScheduleFeedback(text, isError = false) {
-  const fb = document.getElementById("sched-feedback");
+  const fb = typeof document !== "undefined" ? document.getElementById("sched-feedback") : null;
   if (!fb) return;
   fb.textContent = text;
   fb.style.color = isError ? "var(--red)" : "#4ade80";
@@ -486,11 +539,11 @@ function showScheduleFeedback(text, isError = false) {
   }, 4000);
 }
 
-window.saveSchedule = async function() {
-  const wake = document.getElementById("sched-wake-input")?.value || "08:00";
-  const sleep = document.getElementById("sched-sleep-input")?.value || "20:00";
-  const interval = parseInt(document.getElementById("sched-interval-select")?.value || "60");
-  const on = Boolean(document.getElementById("sched-reminder-toggle")?.checked);
+root.saveSchedule = async function() {
+  const wake = typeof document !== "undefined" ? document.getElementById("sched-wake-input")?.value || "08:00" : "08:00";
+  const sleep = typeof document !== "undefined" ? document.getElementById("sched-sleep-input")?.value || "20:00" : "20:00";
+  const interval = typeof document !== "undefined" ? parseInt(document.getElementById("sched-interval-select")?.value || "60") : 60;
+  const on = typeof document !== "undefined" ? Boolean(document.getElementById("sched-reminder-toggle")?.checked) : false;
 
   try {
     const res = await fetch("./commands/schedule", {
@@ -510,7 +563,7 @@ window.saveSchedule = async function() {
   }
 };
 
-window.syncClock = async function() {
+root.syncClock = async function() {
   try {
     const res = await fetch("./commands/time", { method: "POST" });
     const data = await res.json();
@@ -524,3 +577,7 @@ window.syncClock = async function() {
     showScheduleFeedback("❌ Network error", true);
   }
 };
+
+root.parseDate = parseDate;
+root.timeAgo = timeAgo;
+

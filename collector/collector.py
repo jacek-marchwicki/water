@@ -80,6 +80,7 @@ MAX_CLOCK_DRIFT_SEC = int(os.environ.get("WATERH_MAX_CLOCK_DRIFT_SEC", "120"))
 settings_synced: bool = False
 last_settings_sync: datetime | None = None
 last_synced_intake: int | None = None
+last_seen: datetime | None = None
 
 
 
@@ -241,6 +242,21 @@ def get_goal_ml() -> int:
     except Exception:
         pass
     return 1800
+
+
+def get_last_seen_iso() -> str:
+    global last_seen
+    if last_seen:
+        return last_seen.isoformat()
+    try:
+        db = init_db()
+        row = db.execute("SELECT timestamp FROM syncs ORDER BY id DESC LIMIT 1").fetchone()
+        if row and row[0]:
+            return row[0]
+    except Exception:
+        pass
+    return get_local_now().isoformat()
+
 
 
 def set_goal_ml(ml: int):
@@ -1012,7 +1028,7 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
             resp = {
                 "state": "connected",
                 "online": True,
-                "last_seen": get_local_now().isoformat(),
+                "last_seen": get_last_seen_iso(),
                 "bottle": BOTTLE_ADDR,
                 "timezone": os.environ.get("TZ", "UTC"),
                 "settings_synced": settings_synced,
@@ -1357,6 +1373,9 @@ def mark_synced(db, ids):
 # --- Heartbeat & HA Sensor Publishing ---
 
 def post_heartbeat(state: str, detail: str = ""):
+    global last_seen
+    if state == "connected":
+        last_seen = get_local_now()
     status_val = f"{state}: {detail}" if detail else state
     publish_ha_sensor("status", status_val, friendly_name="WaterH Collector Status", icon="mdi:bluetooth-connect")
     if not API_TOKEN:
@@ -1528,7 +1547,7 @@ async def ble_write_and_wait(client, cmd: bytes, label: str, queue: asyncio.Queu
 # --- Sync cycle ---
 
 async def sync_cycle(client, queue: asyncio.Queue, db) -> bool:
-    global settings_synced, last_settings_sync, last_synced_intake
+    global settings_synced, last_settings_sync, last_synced_intake, last_seen
 
     # Step 1: Request bottle data
     pkts = await ble_write_and_wait(client, cmd_bottle_data(), "bottle-data", queue, wait=2.0)
@@ -1590,6 +1609,7 @@ async def sync_cycle(client, queue: asyncio.Queue, db) -> bool:
     if not has_data:
         log.info(f"[BLE] No new water logs, {total_today}ml today")
         log_sync(db, 0, 0, 0)
+        last_seen = get_local_now()
         return True
 
     # Step 5: Collect all PT packets
@@ -1622,6 +1642,7 @@ async def sync_cycle(client, queue: asyncio.Queue, db) -> bool:
         last_synced_intake = total_today
 
     log_sync(db, len(sips), new_count, len(sips) * 13 if sips else 0)
+    last_seen = get_local_now()
     return True
 
 

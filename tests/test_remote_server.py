@@ -196,6 +196,34 @@ class TestServerGoalAndEndpoints(IsolatedServerTestCase):
         finally:
             srv.db = current_db
 
+    def test_status_endpoint_with_heartbeat_returns_iso_last_seen(self):
+        """Verify GET /api/status returns ISO formatted last_seen with timezone from heartbeats."""
+        self.run_async(srv.db.execute(
+            "INSERT INTO heartbeats (state, detail, collector_ts, received_at) VALUES ('connected', 'sync ok', '2026-09-26T21:20:00', '2026-09-26 21:20:00')"
+        ))
+        self.run_async(srv.db.commit())
+
+        resp = self.client.get("/api/status")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["state"], "connected")
+        self.assertEqual(data["detail"], "sync ok")
+        self.assertTrue(data["last_seen"].startswith("2026-09-26T21:20:00+00:00"))
+
+    def test_status_endpoint_fallback_returns_iso_last_seen(self):
+        """Verify GET /api/status fallback uses sips table and returns ISO formatted last_seen."""
+        self.run_async(srv.db.execute(
+            "INSERT INTO sips (timestamp, intake_ml, created_at) VALUES ('2026-09-26T19:00:00', 250, '2026-09-26 19:00:00')"
+        ))
+        self.run_async(srv.db.commit())
+
+        resp = self.client.get("/api/status")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["state"], "unknown")
+        self.assertTrue(data["last_seen"].startswith("2026-09-26T19:00:00+00:00"))
+
 
 if __name__ == "__main__":
     unittest.main()
+

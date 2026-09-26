@@ -261,6 +261,7 @@ async def status():
             try:
                 dt = datetime.fromisoformat(last_sync).replace(tzinfo=timezone.utc)
                 online = (datetime.now(timezone.utc) - dt).total_seconds() < 120
+                last_sync = dt.isoformat()
             except ValueError:
                 pass
         return {"online": online, "state": "unknown", "detail": "", "last_seen": last_sync}
@@ -273,7 +274,7 @@ async def status():
         "online": online,
         "state": row["state"],
         "detail": row["detail"],
-        "last_seen": row["received_at"],
+        "last_seen": received.isoformat(),
         "collector_ts": row["collector_ts"],
     }
 
