@@ -50,22 +50,40 @@ class TestFrontendDashboardDateHandling(unittest.TestCase):
 
         // Test 4: Current timestamp
         const resNow = timeAgo(new Date().toISOString());
-        if (resNow !== 'just now') throw new Error('Current time expected "just now", got: ' + resNow);
+        if (resNow !== '0s ago') throw new Error('Current time expected "0s ago", got: ' + resNow);
 
-        // Test 5: Slight future timestamp (clock skew)
+        // Test 5: Slight future timestamp (clock skew clamped to 0)
         const resFuture = timeAgo(Date.now() + 5000);
-        if (resFuture !== 'just now') throw new Error('Future time expected "just now", got: ' + resFuture);
+        if (resFuture !== '0s ago') throw new Error('Future time expected "0s ago", got: ' + resFuture);
 
-        // Test 6: Invalid date strings must return 'never', not 'NaNd ago'
+        // Test 6: Exact elapsed seconds (< 60s)
+        const res15s = timeAgo(Date.now() - 15000);
+        if (res15s !== '15s ago') throw new Error('15s ago expected, got: ' + res15s);
+
+        // Test 7: Exact elapsed minutes and seconds (< 1h)
+        const res75s = timeAgo(Date.now() - 75000);
+        if (res75s !== '1m 15s ago') throw new Error('1m 15s ago expected, got: ' + res75s);
+
+        // Test 8: Exact elapsed hours, minutes and seconds (< 24h)
+        const resHour = timeAgo(Date.now() - (3600 + 75) * 1000);
+        if (resHour !== '1h 1m 15s ago') throw new Error('1h 1m 15s ago expected, got: ' + resHour);
+
+        // Test 9: Invalid date strings must return 'never', not 'NaNd ago'
         if (timeAgo('invalid-date') !== 'never') throw new Error('Invalid string did not return never');
         if (timeAgo(null) !== 'never') throw new Error('Null did not return never');
         if (timeAgo(undefined) !== 'never') throw new Error('Undefined did not return never');
         if (timeAgo('') !== 'never') throw new Error('Empty string did not return never');
 
-        // Test 7: parseDate handles Date instances, numbers, and strings
+        // Test 10: parseDate handles Date instances, numbers, and strings
         const now = new Date();
         if (parseDate(now).getTime() !== now.getTime()) throw new Error('Date instance parsing failed');
         if (parseDate(1700000000000).getTime() !== 1700000000000) throw new Error('Number timestamp parsing failed');
+
+        // Test 11: renderStatus and getLatestStatus exports
+        const { renderStatus, getLatestStatus } = globalThis;
+        if (typeof renderStatus !== 'function') throw new Error('renderStatus not a function');
+        if (typeof getLatestStatus !== 'function') throw new Error('getLatestStatus not a function');
+        renderStatus(); // Should safely no-op when document/latestStatus is null
         """
 
         res = subprocess.run(

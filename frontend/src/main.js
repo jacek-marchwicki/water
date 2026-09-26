@@ -3,10 +3,47 @@ const POLL_INTERVAL = 10000;
 let pollTimer = null;
 let currentGoal = 1800;
 
+let latestStatus = null;
+let statusTimer = null;
+
+function renderStatus() {
+  if (!latestStatus) return;
+  const el = typeof document !== "undefined" ? document.getElementById("status") : null;
+  if (!el) return;
+
+  const ago = timeAgo(latestStatus.last_seen);
+  if (latestStatus.state === "connected") {
+    el.className = "status online";
+    el.textContent = ago && ago !== "never" ? `connected — ${ago}` : "connected";
+  } else if (latestStatus.state === "scanning") {
+    el.className = "status online";
+    el.textContent = `scanning — ${latestStatus.detail || (ago !== "never" ? ago : "searching")}`;
+  } else if (latestStatus.online) {
+    el.className = "status online";
+    el.textContent = ago && ago !== "never" ? `synced ${ago}` : "synced";
+  } else {
+    el.className = "status offline";
+    el.textContent = `offline — ${latestStatus.state || "unknown"}${ago && ago !== "never" ? ` (${ago})` : ""}`;
+  }
+}
+
+function startStatusTimer() {
+  stopStatusTimer();
+  statusTimer = setInterval(renderStatus, 1000);
+}
+
+function stopStatusTimer() {
+  if (statusTimer) {
+    clearInterval(statusTimer);
+    statusTimer = null;
+  }
+}
+
 // --- Visibility-based polling ---
 function startPolling() {
   stopPolling();
   pollTimer = setInterval(loadToday, POLL_INTERVAL);
+  startStatusTimer();
 }
 
 function stopPolling() {
@@ -14,6 +51,7 @@ function stopPolling() {
     clearInterval(pollTimer);
     pollTimer = null;
   }
+  stopStatusTimer();
 }
 
 // --- Navigation & Listeners ---
@@ -89,21 +127,8 @@ async function loadToday() {
     hideSkeleton();
     if (!scheduleLoaded) loadSchedule();
 
-    const el = document.getElementById("status");
-    const ago = timeAgo(status.last_seen);
-    if (status.state === "connected") {
-      el.className = "status online";
-      el.textContent = ago && ago !== "never" ? `connected — ${ago}` : "connected";
-    } else if (status.state === "scanning") {
-      el.className = "status online";
-      el.textContent = `scanning — ${status.detail || (ago !== "never" ? ago : "searching")}`;
-    } else if (status.online) {
-      el.className = "status online";
-      el.textContent = ago && ago !== "never" ? `synced ${ago}` : "synced";
-    } else {
-      el.className = "status offline";
-      el.textContent = `offline — ${status.state || "unknown"}${ago && ago !== "never" ? ` (${ago})` : ""}`;
-    }
+    latestStatus = status;
+    renderStatus();
 
     const mlEl = document.getElementById("today-ml");
     const sipsEl = document.getElementById("today-sips");
@@ -380,12 +405,18 @@ function parseDate(iso) {
 function timeAgo(iso) {
   const d = parseDate(iso);
   if (!d) return "never";
-  const diff = Math.max(0, (Date.now() - d.getTime()) / 1000);
+  const diff = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
   if (isNaN(diff)) return "never";
-  if (diff < 60) return "just now";
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${Math.floor(diff / 86400)}d ago`;
+  if (diff < 60) return `${diff}s ago`;
+  const m = Math.floor(diff / 60);
+  const s = diff % 60;
+  if (diff < 3600) return `${m}m ${s}s ago`;
+  const h = Math.floor(diff / 3600);
+  const remM = m % 60;
+  if (diff < 86400) return `${h}h ${remM}m ${s}s ago`;
+  const day = Math.floor(diff / 86400);
+  const remH = h % 24;
+  return `${day}d ${remH}h ago`;
 }
 
 // --- Init ---
@@ -580,4 +611,6 @@ root.syncClock = async function() {
 
 root.parseDate = parseDate;
 root.timeAgo = timeAgo;
+root.renderStatus = renderStatus;
+root.getLatestStatus = () => latestStatus;
 
