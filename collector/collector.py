@@ -23,7 +23,7 @@ import subprocess
 import time
 import urllib.request
 import urllib.error
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 try:
@@ -384,6 +384,402 @@ def set_schedule_settings(
         ha_conn.publish_state("number/reminder_interval", sched["interval_min"])
         ha_conn.publish_state("switch/reminder", "ON" if sched["reminder_on"] else "OFF")
     return sched
+
+
+# --- Smart Hydration Glow Reminders ---
+
+DEFAULT_SMART_REMINDERS = {
+    "enabled": False,
+    "sip_interval_min": 40,
+    "behind_only": False,
+    "gentle_mode": "default",
+    "gentle_repeat_min": 3,
+    "escalation_delay_min": 15,
+    "escalated_mode": "rainbow",
+    "snooze_min": 10,
+    "auto_off_min": 60,
+}
+
+smart_reminders_snooze_until: datetime | None = None
+smart_reminders_auto_off: bool = False
+smart_reminders_last_notified_at: datetime | None = None
+smart_reminders_last_state: str = "idle"
+
+
+def get_smart_reminder_settings() -> dict:
+    cfg = dict(DEFAULT_SMART_REMINDERS)
+    try:
+        db = init_db()
+        rows = db.execute(
+            "SELECT key, value FROM settings WHERE key LIKE 'smart_reminders_%'"
+        ).fetchall()
+        for k, v in rows:
+            if k == "smart_reminders_enabled":
+                cfg["enabled"] = v in ("1", "true", "True", "ON", "on")
+            elif k == "smart_reminders_interval_min":
+                cfg["sip_interval_min"] = int(v)
+            elif k == "smart_reminders_behind_only":
+                cfg["behind_only"] = v in ("1", "true", "True", "ON", "on")
+            elif k == "smart_reminders_gentle_mode":
+                cfg["gentle_mode"] = v
+            elif k == "smart_reminders_gentle_repeat_min":
+                cfg["gentle_repeat_min"] = int(v)
+            elif k == "smart_reminders_escalation_min":
+                cfg["escalation_delay_min"] = int(v)
+            elif k == "smart_reminders_escalated_mode":
+                cfg["escalated_mode"] = v
+            elif k == "smart_reminders_snooze_min":
+                cfg["snooze_min"] = int(v)
+            elif k == "smart_reminders_auto_off_min":
+                cfg["auto_off_min"] = int(v)
+    except Exception as e:
+        log.error(f"[DB] Error loading smart reminder settings: {e}")
+    return cfg
+
+
+def set_smart_reminder_settings(
+    enabled: bool | None = None,
+    sip_interval_min: int | None = None,
+    behind_only: bool | None = None,
+    gentle_mode: str | None = None,
+    gentle_repeat_min: int | None = None,
+    escalation_delay_min: int | None = None,
+    escalated_mode: str | None = None,
+    snooze_min: int | None = None,
+    auto_off_min: int | None = None,
+) -> dict:
+    try:
+        db = init_db()
+        if enabled is not None:
+            db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('smart_reminders_enabled', ?)", ("1" if enabled else "0",))
+        if sip_interval_min is not None:
+            db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('smart_reminders_interval_min', ?)", (str(max(1, int(sip_interval_min))),))
+        if behind_only is not None:
+            db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('smart_reminders_behind_only', ?)", ("1" if behind_only else "0",))
+        if gentle_mode is not None:
+            db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('smart_reminders_gentle_mode', ?)", (str(gentle_mode).lower(),))
+        if gentle_repeat_min is not None:
+            db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('smart_reminders_gentle_repeat_min', ?)", (str(max(1, int(gentle_repeat_min))),))
+        if escalation_delay_min is not None:
+            db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('smart_reminders_escalation_min', ?)", (str(max(1, int(escalation_delay_min))),))
+        if escalated_mode is not None:
+            db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('smart_reminders_escalated_mode', ?)", (str(escalated_mode).lower(),))
+        if snooze_min is not None:
+            db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('smart_reminders_snooze_min', ?)", (str(max(1, int(snooze_min))),))
+        if auto_off_min is not None:
+            db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('smart_reminders_auto_off_min', ?)", (str(max(1, int(auto_off_min))),))
+        db.commit()
+    except Exception as e:
+        log.error(f"[DB] Error saving smart reminder settings: {e}")
+    return get_smart_reminder_settings()
+
+
+def calculate_expected_intake(now_dt: datetime, goal_ml: int, schedule: dict | None = None) -> int:
+    """Calculate expected cumulative intake (ml) assuming linear progression between wake and sleep."""
+    if schedule is None:
+        schedule = get_schedule_settings()
+    wake_h = int(schedule.get("wake_hour", 8))
+    wake_m = int(schedule.get("wake_minute", 0))
+    sleep_h = int(schedule.get("sleep_hour", 20))
+    sleep_m = int(schedule.get("sleep_minute", 0))
+
+    wake_min = wake_h * 60 + wake_m
+    sleep_min = sleep_h * 60 + sleep_m
+
+    if sleep_min <= wake_min:
+        return 0
+
+    current_min = now_dt.hour * 60 + now_dt.minute + (now_dt.second / 60.0)
+
+    if current_min <= wake_min:
+        return 0
+    if current_min >= sleep_min:
+        return goal_ml
+
+    ratio = (current_min - wake_min) / float(sleep_min - wake_min)
+    return int(goal_ml * ratio)
+
+
+def is_in_active_window(now_dt: datetime, schedule: dict | None = None) -> bool:
+    """Check if current time is within wake-to-sleep active daytime hours."""
+    if schedule is None:
+        schedule = get_schedule_settings()
+    wake_h = int(schedule.get("wake_hour", 8))
+    wake_m = int(schedule.get("wake_minute", 0))
+    sleep_h = int(schedule.get("sleep_hour", 20))
+    sleep_m = int(schedule.get("sleep_minute", 0))
+
+    wake_min = wake_h * 60 + wake_m
+    sleep_min = sleep_h * 60 + sleep_m
+
+    current_min = now_dt.hour * 60 + now_dt.minute
+    return wake_min <= current_min < sleep_min
+
+
+def get_last_sip_time(db=None, now_dt: datetime | None = None) -> datetime | None:
+    """Retrieve the datetime of the latest recorded sip today."""
+    close_db = False
+    if db is None:
+        db = init_db()
+        close_db = True
+    try:
+        if now_dt is None:
+            now_dt = get_local_now()
+        today_str = now_dt.strftime("%Y-%m-%d")
+        row = db.execute(
+            "SELECT timestamp FROM sips WHERE DATE(timestamp) = ? ORDER BY timestamp DESC LIMIT 1",
+            (today_str,)
+        ).fetchone()
+        if row and row[0]:
+            try:
+                ts_str = row[0].replace("Z", "")
+                dt = datetime.fromisoformat(ts_str)
+                if dt.tzinfo is None and now_dt.tzinfo is not None:
+                    dt = dt.replace(tzinfo=now_dt.tzinfo)
+                elif dt.tzinfo is not None and now_dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=None)
+                return dt
+            except Exception as e:
+                log.warning(f"[DB] Error parsing sip timestamp '{row[0]}': {e}")
+        return None
+    finally:
+        if close_db:
+            db.close()
+
+
+def get_effective_last_activity_time(db=None, now_dt: datetime | None = None, schedule: dict | None = None) -> datetime:
+    """Get the reference timestamp to compute idle minutes (latest sip or today's wake time)."""
+    if now_dt is None:
+        now_dt = get_local_now()
+    if schedule is None:
+        schedule = get_schedule_settings()
+
+    wake_h = int(schedule.get("wake_hour", 8))
+    wake_m = int(schedule.get("wake_minute", 0))
+    wake_dt = now_dt.replace(hour=wake_h, minute=wake_m, second=0, microsecond=0)
+
+    last_sip = get_last_sip_time(db, now_dt)
+    if last_sip is not None:
+        if last_sip.tzinfo is None and now_dt.tzinfo is not None:
+            last_sip = last_sip.replace(tzinfo=now_dt.tzinfo)
+        elif last_sip.tzinfo is not None and now_dt.tzinfo is None:
+            last_sip = last_sip.replace(tzinfo=None)
+        return max(last_sip, wake_dt)
+    return wake_dt
+
+
+def on_sip_recorded(db=None, sip_time: datetime | None = None):
+    """Triggered whenever a sip is stored. Resets auto-off, snoozes reminders, and clears last notify."""
+    global smart_reminders_snooze_until, smart_reminders_auto_off, smart_reminders_last_notified_at, smart_reminders_last_state
+    now = sip_time or get_local_now()
+    cfg = get_smart_reminder_settings()
+    snooze_min = cfg.get("snooze_min", 10)
+    smart_reminders_snooze_until = now + timedelta(minutes=snooze_min)
+    smart_reminders_auto_off = False
+    smart_reminders_last_notified_at = None
+    smart_reminders_last_state = "idle"
+    log.info(f"[SMART-REMINDERS] Sip recorded. Snoozing reminders for {snooze_min}m (until {smart_reminders_snooze_until.strftime('%H:%M:%S')})")
+
+
+def evaluate_smart_reminders(
+    now_dt: datetime | None = None,
+    db=None,
+    trigger_notification: bool = True
+) -> tuple[str, tuple[bytes, str] | None, dict]:
+    """
+    Evaluate the smart reminders state machine.
+    Returns: (state, cmd_tuple_or_none, state_info_dict)
+    """
+    global smart_reminders_snooze_until, smart_reminders_auto_off, smart_reminders_last_notified_at, smart_reminders_last_state
+
+    if now_dt is None:
+        now_dt = get_local_now()
+
+    cfg = get_smart_reminder_settings()
+    sched = get_schedule_settings()
+
+    close_db = False
+    if db is None:
+        db = init_db()
+        close_db = True
+
+    try:
+        today_total = get_today_total(db)
+        expected_ml = calculate_expected_intake(now_dt, GOAL_ML, sched)
+        behind_schedule = today_total < expected_ml
+        to_reach_expected = max(0, expected_ml - today_total)
+
+        # 1. Feature disabled check
+        if not cfg.get("enabled", False):
+            smart_reminders_last_state = "disabled"
+            return "disabled", None, {
+                "state": "disabled",
+                "idle_minutes": 0,
+                "behind_schedule": behind_schedule,
+                "expected_ml": expected_ml,
+                "today_total_ml": today_total,
+                "behind_ml": to_reach_expected,
+                "to_reach_expected_ml": to_reach_expected,
+                "snoozed": False,
+                "auto_off": False,
+            }
+
+        # 2. Daytime active window check
+        if not is_in_active_window(now_dt, sched):
+            smart_reminders_last_state = "outside_hours"
+            return "outside_hours", None, {
+                "state": "outside_hours",
+                "idle_minutes": 0,
+                "behind_schedule": behind_schedule,
+                "expected_ml": expected_ml,
+                "today_total_ml": today_total,
+                "behind_ml": to_reach_expected,
+                "to_reach_expected_ml": to_reach_expected,
+                "snoozed": False,
+                "auto_off": False,
+            }
+
+        # 3. Drink snooze check
+        snoozed = False
+        snooze_rem_sec = 0
+        if smart_reminders_snooze_until is not None:
+            if smart_reminders_snooze_until.tzinfo is None and now_dt.tzinfo is not None:
+                smart_reminders_snooze_until = smart_reminders_snooze_until.replace(tzinfo=now_dt.tzinfo)
+            elif smart_reminders_snooze_until.tzinfo is not None and now_dt.tzinfo is None:
+                smart_reminders_snooze_until = smart_reminders_snooze_until.replace(tzinfo=None)
+
+            if now_dt < smart_reminders_snooze_until:
+                snoozed = True
+                snooze_rem_sec = int((smart_reminders_snooze_until - now_dt).total_seconds())
+            else:
+                smart_reminders_snooze_until = None
+
+        if snoozed:
+            smart_reminders_last_state = "snoozed"
+            return "snoozed", None, {
+                "state": "snoozed",
+                "idle_minutes": 0,
+                "behind_schedule": behind_schedule,
+                "expected_ml": expected_ml,
+                "today_total_ml": today_total,
+                "behind_ml": to_reach_expected,
+                "to_reach_expected_ml": to_reach_expected,
+                "snoozed": True,
+                "snooze_remaining_seconds": snooze_rem_sec,
+                "auto_off": smart_reminders_auto_off,
+            }
+
+        # 4. Calculate idle time
+        ref_time = get_effective_last_activity_time(db, now_dt, sched)
+        elapsed_sec = max(0.0, (now_dt - ref_time).total_seconds())
+        elapsed_min = elapsed_sec / 60.0
+
+        # 5. Absence auto-off check
+        auto_off_limit = cfg.get("auto_off_min", 60)
+        if elapsed_min >= auto_off_limit:
+            smart_reminders_auto_off = True
+
+        if smart_reminders_auto_off:
+            smart_reminders_last_state = "auto_off"
+            return "auto_off", None, {
+                "state": "auto_off",
+                "idle_minutes": round(elapsed_min, 1),
+                "behind_schedule": behind_schedule,
+                "expected_ml": expected_ml,
+                "today_total_ml": today_total,
+                "behind_ml": to_reach_expected,
+                "to_reach_expected_ml": to_reach_expected,
+                "snoozed": False,
+                "auto_off": True,
+            }
+
+        # 6. Behind schedule pacing option
+        if cfg.get("behind_only", False) and not behind_schedule:
+            smart_reminders_last_state = "on_track"
+            return "on_track", None, {
+                "state": "on_track",
+                "idle_minutes": round(elapsed_min, 1),
+                "behind_schedule": False,
+                "expected_ml": expected_ml,
+                "today_total_ml": today_total,
+                "behind_ml": 0,
+                "to_reach_expected_ml": 0,
+                "snoozed": False,
+                "auto_off": False,
+            }
+
+        # 7. Escalation Stage Check
+        sip_interval = cfg.get("sip_interval_min", 40)
+        escalation_delay = cfg.get("escalation_delay_min", 15)
+        repeat_min = cfg.get("gentle_repeat_min", 3)
+        repeat_sec = repeat_min * 60
+
+        state = "idle"
+        cmd = None
+        mode = None
+
+        if elapsed_min >= (sip_interval + escalation_delay):
+            state = "escalated"
+            mode = cfg.get("escalated_mode", "rainbow")
+        elif elapsed_min >= sip_interval:
+            state = "gentle"
+            mode = cfg.get("gentle_mode", "default")
+
+        if mode is not None:
+            should_notify = False
+            # Normalize notification timestamp timezone
+            if smart_reminders_last_notified_at is not None:
+                if smart_reminders_last_notified_at.tzinfo is None and now_dt.tzinfo is not None:
+                    smart_reminders_last_notified_at = smart_reminders_last_notified_at.replace(tzinfo=now_dt.tzinfo)
+                elif smart_reminders_last_notified_at.tzinfo is not None and now_dt.tzinfo is None:
+                    smart_reminders_last_notified_at = smart_reminders_last_notified_at.replace(tzinfo=None)
+
+            if smart_reminders_last_notified_at is None:
+                should_notify = True
+            elif state != smart_reminders_last_state:
+                # Immediate notify upon escalating to a new level
+                should_notify = True
+            elif (now_dt - smart_reminders_last_notified_at).total_seconds() >= (repeat_sec - 1):
+                should_notify = True
+
+            if should_notify:
+                if trigger_notification:
+                    smart_reminders_last_notified_at = now_dt
+                cmd = (cmd_set_led(mode, "blue"), f"smart-reminder {state} ({mode})")
+
+        smart_reminders_last_state = state
+        return state, cmd, {
+            "state": state,
+            "idle_minutes": round(elapsed_min, 1),
+            "behind_schedule": behind_schedule,
+            "expected_ml": expected_ml,
+            "today_total_ml": today_total,
+            "behind_ml": to_reach_expected,
+            "to_reach_expected_ml": to_reach_expected,
+            "snoozed": False,
+            "auto_off": False,
+        }
+
+    finally:
+        if close_db:
+            db.close()
+
+
+async def smart_reminders_evaluator_loop():
+    """Background evaluation loop for smart hydration reminders."""
+    log.info("[SMART-REMINDERS] Background evaluator started")
+    try:
+        while True:
+            try:
+                state, cmd, info = evaluate_smart_reminders(trigger_notification=True)
+                if cmd is not None and cmd_queue:
+                    cmd_queue.put_nowait(cmd)
+                    log.info(f"[SMART-REMINDERS] Queued {cmd[1]} (state: {state}, {info.get('idle_minutes')}m idle)")
+            except Exception as e:
+                log.error(f"[SMART-REMINDERS] Evaluator error: {e}")
+            await asyncio.sleep(5)
+    except asyncio.CancelledError:
+        pass
 
 
 # --- Protocol commands ---
@@ -1041,6 +1437,10 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
             sips = [{"id": r[0], "timestamp": r[1], "intake_ml": r[2], "temp_c": None, "tds": r[4], "raw_hex": r[5] if len(r) > 5 else None} for r in rows]
             last_temp = None
             bat, chg = get_battery_state()
+            now = get_local_now()
+            sched = get_schedule_settings()
+            expected_ml = calculate_expected_intake(now, GOAL_ML, sched)
+            behind_ml = max(0, expected_ml - total_today)
             resp = {
                 "total_ml": total_today,
                 "goal_ml": GOAL_ML,
@@ -1049,6 +1449,8 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
                 "last_temp_c": last_temp,
                 "battery": bat,
                 "charging": chg,
+                "expected_ml": expected_ml,
+                "behind_ml": behind_ml,
                 "sips": sips,
             }
             send_json(writer, 200, resp)
@@ -1072,6 +1474,51 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
         elif method == "GET" and path in ["/api/schedule", "/schedule"]:
             sched = get_schedule_settings()
             send_json(writer, 200, sched)
+
+        elif method == "GET" and path in ["/api/smart-reminders", "/api/smart_reminders"]:
+            cfg = get_smart_reminder_settings()
+            sched = get_schedule_settings()
+            state, _, info = evaluate_smart_reminders(trigger_notification=False)
+            resp = {
+                **cfg,
+                **info,
+                "wake_time": sched["wake_time"],
+                "sleep_time": sched["sleep_time"],
+            }
+            send_json(writer, 200, resp)
+
+        elif method == "POST" and path in ["/api/smart-reminders", "/api/smart_reminders", "/commands/smart-reminders", "/commands/smart_reminders"]:
+            data = json.loads(body) if body else {}
+            enabled = data.get("enabled")
+            sip_interval = data.get("sip_interval_min") or data.get("interval_min")
+            behind_only = data.get("behind_only")
+            gentle_mode = data.get("gentle_mode")
+            gentle_repeat = data.get("gentle_repeat_min") or data.get("repeat_min")
+            escalation_delay = data.get("escalation_delay_min")
+            escalated_mode = data.get("escalated_mode")
+            snooze_min = data.get("snooze_min")
+            auto_off_min = data.get("auto_off_min")
+
+            updated = set_smart_reminder_settings(
+                enabled=enabled,
+                sip_interval_min=sip_interval,
+                behind_only=behind_only,
+                gentle_mode=gentle_mode,
+                gentle_repeat_min=gentle_repeat,
+                escalation_delay_min=escalation_delay,
+                escalated_mode=escalated_mode,
+                snooze_min=snooze_min,
+                auto_off_min=auto_off_min,
+            )
+            sched = get_schedule_settings()
+            state, _, info = evaluate_smart_reminders(trigger_notification=False)
+            resp = {
+                **updated,
+                **info,
+                "wake_time": sched["wake_time"],
+                "sleep_time": sched["sleep_time"],
+            }
+            send_json(writer, 200, resp)
 
         elif method == "GET" and path.startswith("/api/history"):
             db = init_db()
@@ -1160,6 +1607,7 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
                     (now_str, ml)
                 )
                 db.commit()
+                on_sip_recorded(db)
                 total_today = get_today_total(db)
                 publish_ha_sensor("today_intake", total_today, unit="mL", friendly_name="WaterH Today Intake", icon="mdi:cup-water", device_class="water", state_class="total_increasing")
                 if cmd_queue:
@@ -1313,6 +1761,9 @@ def publish_ha_sensor(
 
 
 
+smart_reminders_task: asyncio.Task | None = None
+
+
 async def start_cmd_server():
     server = await asyncio.start_server(handle_cmd_request, "0.0.0.0", CMD_PORT)
     log.info(f"[HTTP] Command server listening on :{CMD_PORT}")
@@ -1371,6 +1822,14 @@ def store_sips(db, sips):
         except sqlite3.IntegrityError:
             pass
     db.commit()
+    if new_count > 0:
+        last_sip_dt = None
+        if sips and sips[-1].get("timestamp"):
+            try:
+                last_sip_dt = datetime.fromisoformat(sips[-1]["timestamp"].replace("Z", ""))
+            except Exception:
+                pass
+        on_sip_recorded(db, sip_time=last_sip_dt)
     return new_count
 
 
@@ -1821,6 +2280,13 @@ async def ble_loop():
                     for _ in range(POLL_INTERVAL):
                         if disconnected_event.is_set():
                             break
+                        try:
+                            state, s_cmd, info = evaluate_smart_reminders(trigger_notification=True)
+                            if s_cmd is not None:
+                                cmd_queue.put_nowait(s_cmd)
+                        except Exception as e:
+                            log.error(f"[SMART-REMINDERS] Evaluation error: {e}")
+
                         if not cmd_queue.empty():
                             while not cmd_queue.empty():
                                 try:

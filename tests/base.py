@@ -14,6 +14,24 @@ from pathlib import Path
 import collector.collector as col
 
 
+class MockWriter:
+    def __init__(self):
+        self.data = bytearray()
+        self.closed = False
+
+    def write(self, data: bytes):
+        self.data.extend(data)
+
+    async def drain(self):
+        pass
+
+    def close(self):
+        self.closed = True
+
+    async def wait_closed(self):
+        pass
+
+
 class IsolatedCollectorTestCase(unittest.TestCase):
     """
     Test case base class ensuring each test runs in an isolated temporary
@@ -40,6 +58,9 @@ class IsolatedCollectorTestCase(unittest.TestCase):
         self._orig_last_seen = getattr(col, "last_seen", None)
         self._orig_battery = getattr(col, "battery", None)
         self._orig_charging = getattr(col, "charging", None)
+        self._orig_smart_snooze = getattr(col, "smart_reminders_snooze_until", None)
+        self._orig_smart_auto_off = getattr(col, "smart_reminders_auto_off", False)
+        self._orig_smart_last_notified = getattr(col, "smart_reminders_last_notified_at", None)
 
         # Set isolated globals
         col.DB_PATH = str(self.db_path)
@@ -56,6 +77,9 @@ class IsolatedCollectorTestCase(unittest.TestCase):
         col.last_seen = None
         col.battery = None
         col.charging = None
+        col.smart_reminders_snooze_until = None
+        col.smart_reminders_auto_off = False
+        col.smart_reminders_last_notified_at = None
 
     def tearDown(self):
         # Restore globals
@@ -73,6 +97,9 @@ class IsolatedCollectorTestCase(unittest.TestCase):
         col.last_seen = self._orig_last_seen
         col.battery = self._orig_battery
         col.charging = self._orig_charging
+        col.smart_reminders_snooze_until = self._orig_smart_snooze
+        col.smart_reminders_auto_off = self._orig_smart_auto_off
+        col.smart_reminders_last_notified_at = self._orig_smart_last_notified
 
         # Clean up temporary directory
         if os.path.exists(self.temp_dir):

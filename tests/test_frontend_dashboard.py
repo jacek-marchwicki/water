@@ -17,11 +17,31 @@ class TestFrontendDashboardDateHandling(unittest.TestCase):
     def setUp(self):
         super().setUp()
         self.frontend_js = Path(__file__).parent.parent / "frontend" / "src" / "main.js"
+        self.frontend_html = Path(__file__).parent.parent / "frontend" / "index.html"
         self.node_bin = shutil.which("node")
 
     def test_frontend_main_js_exists(self):
         """Ensure frontend/src/main.js exists."""
         self.assertTrue(self.frontend_js.is_file())
+
+    def test_frontend_html_contains_pacing_and_smart_glow_elements(self):
+        """Ensure frontend/index.html defines pacing metrics and smart reminder configuration."""
+        self.assertTrue(self.frontend_html.is_file())
+        html = self.frontend_html.read_text(encoding="utf-8")
+        self.assertIn('id="stat-pacing"', html)
+        self.assertIn('id="pacing-expected-ml"', html)
+        self.assertIn('id="pacing-bar"', html)
+        self.assertIn('id="pacing-status-text"', html)
+        self.assertIn('id="smart-pacing-summary"', html)
+        self.assertIn('id="smart-pacing-expected"', html)
+        self.assertIn('id="smart-pacing-needed"', html)
+        self.assertIn('id="smart-pacing-status-pill"', html)
+        self.assertIn('id="smart-reminder-toggle"', html)
+        self.assertIn('id="smart-interval-select"', html)
+        self.assertIn('id="smart-gentle-mode-select"', html)
+        self.assertIn('id="smart-escalated-mode-select"', html)
+        self.assertIn('id="smart-snooze-select"', html)
+        self.assertIn('id="smart-autooff-select"', html)
 
     def test_node_execution_parse_date_and_time_ago(self):
         """Run Node.js assertions directly against frontend/src/main.js."""
@@ -104,6 +124,12 @@ class TestFrontendDashboardDateHandling(unittest.TestCase):
             'header-battery': { style: { display: '' }, className: '', title: '' },
             'header-battery-val': { textContent: '' },
             'header-battery-icon': { textContent: '' },
+            'pacing-expected-ml': { textContent: '' },
+            'pacing-bar': { style: { width: '', background: '' } },
+            'pacing-status-text': { textContent: '', style: { color: '' } },
+            'smart-pacing-expected': { textContent: '' },
+            'smart-pacing-needed': { textContent: '', style: { color: '' } },
+            'smart-pacing-status-pill': { textContent: '', style: { background: '', color: '' } },
         };
         globalThis.document = {
             getElementById: (id) => mockElements[id] || null,
@@ -143,6 +169,70 @@ class TestFrontendDashboardDateHandling(unittest.TestCase):
         if (mockElements['today-battery'].textContent !== '—') throw new Error('null battery expected —');
         if (mockElements['header-battery'].style.display !== 'none') throw new Error('null header pill expected hidden');
         if (mockElements['battery-status-text'].textContent !== 'Waiting for sync') throw new Error('null status expected Waiting for sync');
+
+        // Test 17: Smart toggle text
+        const { updateSmartToggleText, renderSmartBadge } = globalThis;
+        mockElements['smart-toggle-label'] = { textContent: '', style: {} };
+        mockElements['smart-reminders-badge'] = { textContent: '', style: {} };
+
+        updateSmartToggleText(true);
+        if (mockElements['smart-toggle-label'].textContent !== 'Smart Glow On') throw new Error('Expected Smart Glow On');
+        updateSmartToggleText(false);
+        if (mockElements['smart-toggle-label'].textContent !== 'Smart Glow Off') throw new Error('Expected Smart Glow Off');
+
+        // Test 18: Render badge states
+        renderSmartBadge({ enabled: false });
+        if (mockElements['smart-reminders-badge'].textContent !== 'Disabled') throw new Error('Expected Disabled badge');
+
+        renderSmartBadge({ enabled: true, state: 'gentle', idle_minutes: 42 });
+        if (!mockElements['smart-reminders-badge'].textContent.includes('Gentle')) throw new Error('Expected Gentle badge');
+
+        renderSmartBadge({ enabled: true, state: 'escalated', idle_minutes: 56 });
+        if (!mockElements['smart-reminders-badge'].textContent.includes('Escalated')) throw new Error('Expected Escalated badge');
+
+        renderSmartBadge({ enabled: true, state: 'snoozed', snooze_remaining_seconds: 480 });
+        if (!mockElements['smart-reminders-badge'].textContent.includes('Snoozed')) throw new Error('Expected Snoozed badge');
+
+        renderSmartBadge({ enabled: true, state: 'auto_off', idle_minutes: 70 });
+        if (!mockElements['smart-reminders-badge'].textContent.includes('Away')) throw new Error('Expected Away badge');
+
+        // Test 19: Pacing behind schedule (total 400ml, expected 650ml)
+        const { renderPacing, getLatestPacing } = globalThis;
+        if (typeof renderPacing !== 'function') throw new Error('renderPacing not a function');
+        if (typeof getLatestPacing !== 'function') throw new Error('getLatestPacing not a function');
+
+        renderPacing({ total_ml: 400, expected_ml: 650, goal_ml: 1800 });
+        if (mockElements['pacing-expected-ml'].textContent !== '650') throw new Error('Expected 650ml expected target');
+        if (mockElements['pacing-bar'].style.width !== '62%') throw new Error('Expected 62% bar width');
+        if (mockElements['pacing-bar'].style.background !== '#fbbf24') throw new Error('Expected amber bar background');
+        if (!mockElements['pacing-status-text'].textContent.includes('Drink 250 ml to reach target')) throw new Error('Expected drink 250 ml status');
+        if (mockElements['smart-pacing-expected'].textContent !== '650 mL') throw new Error('Expected 650 mL smart pacing expected');
+        if (mockElements['smart-pacing-needed'].textContent !== '250 mL') throw new Error('Expected 250 mL needed');
+        if (!mockElements['smart-pacing-status-pill'].textContent.includes('Behind (250 mL)')) throw new Error('Expected Behind pill');
+
+        const p1 = getLatestPacing();
+        if (!p1 || p1.diff !== 250 || p1.on_track !== false) throw new Error('getLatestPacing behind state invalid');
+
+        // Test 20: Pacing ahead of schedule (total 800ml, expected 650ml)
+        renderPacing({ total_ml: 800, expected_ml: 650, goal_ml: 1800 });
+        if (mockElements['pacing-bar'].style.width !== '100%') throw new Error('Expected 100% bar width');
+        if (mockElements['pacing-bar'].style.background !== 'var(--green)') throw new Error('Expected green bar background');
+        if (!mockElements['pacing-status-text'].textContent.includes('+150 ml ahead of pace')) throw new Error('Expected ahead of pace text');
+        if (mockElements['smart-pacing-needed'].textContent !== '0 mL (On Track)') throw new Error('Expected 0 mL (On Track)');
+        if (!mockElements['smart-pacing-status-pill'].textContent.includes('Ahead (+150 mL)')) throw new Error('Expected Ahead pill');
+
+        const p2 = getLatestPacing();
+        if (!p2 || p2.diff !== -150 || p2.on_track !== true) throw new Error('getLatestPacing ahead state invalid');
+
+        // Test 21: Pacing on target (total 650ml, expected 650ml)
+        renderPacing({ total_ml: 650, expected_ml: 650, goal_ml: 1800 });
+        if (!mockElements['pacing-status-text'].textContent.includes('On target pace')) throw new Error('Expected on target pace text');
+        if (mockElements['smart-pacing-status-pill'].textContent !== 'On Track') throw new Error('Expected On Track pill');
+
+        // Test 22: Early morning before wake (expected 0ml)
+        renderPacing({ total_ml: 0, expected_ml: 0, goal_ml: 1800, wake_time: '08:00' });
+        if (mockElements['pacing-expected-ml'].textContent !== '0') throw new Error('Expected 0 expected target before wake');
+        if (!mockElements['pacing-status-text'].textContent.includes('Day starts at 08:00')) throw new Error('Expected Day starts at 08:00');
         """
 
         res = subprocess.run(

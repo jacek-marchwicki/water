@@ -59,6 +59,14 @@
             <div class="progress"><div class="progress-fill" id="battery-bar" style="width: 0%"></div></div>
             <div class="stat-sub" id="battery-status-text">Waiting for sync</div>
           </div>
+          <div class="stat" id="stat-pacing">
+            <div class="stat-label">Schedule Pace</div>
+            <div class="stat-value">
+              <span id="pacing-expected-ml">0</span><span class="unit">ml</span>
+            </div>
+            <div class="progress"><div class="progress-fill" id="pacing-bar" style="width: 0%"></div></div>
+            <div class="stat-sub" id="pacing-status-text">Calculating...</div>
+          </div>
         </div>
 
         <div class="card goal-card" style="margin-bottom: 20px;">
@@ -122,6 +130,130 @@
               <button class="quick-btn" style="padding: 7px 12px; font-size: 0.8rem;" onclick="syncClock()">🕒 Sync Clock</button>
             </div>
             <span id="sched-feedback" style="font-size:0.8rem; color:#4ade80; display:none;"></span>
+          </div>
+        </div>
+
+        <div class="card smart-reminders-card" style="margin-bottom: 20px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px; flex-wrap:wrap; gap:8px;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <h3 style="font-size: 1rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin:0;">
+                ✨ Smart Hydration Glow
+              </h3>
+              <span id="smart-reminders-badge" class="smart-badge" style="font-size:0.75rem; padding:2px 8px; border-radius:12px; background:rgba(255,255,255,0.08); color:var(--text-dim); font-weight:600;">Disabled</span>
+            </div>
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.85rem; font-weight:600;">
+              <input type="checkbox" id="smart-reminder-toggle" onchange="updateSmartToggleText(this.checked)" style="accent-color:var(--accent); width:18px; height:18px; cursor:pointer;">
+              <span id="smart-toggle-label" style="color:var(--text-dim);">Smart Glow Off</span>
+            </label>
+          </div>
+
+          <p style="font-size: 0.8rem; color: var(--text-dim); margin-bottom: 14px; line-height: 1.4;">
+            Adaptive bottle LED reminders that track your hydration pacing. Triggers gentle glow alerts when overdue, escalates to a vivid pulse, snoozes after taking a drink, and stays silent when away. Active hours (<span id="smart-active-hours-note" style="color:var(--accent); font-weight:600;">08:00 - 20:00</span>) are shared with the Active Day schedule above.
+          </p>
+
+          <div id="smart-pacing-summary" style="display:flex; justify-content:space-between; align-items:center; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:10px 14px; margin-bottom:14px; font-size:0.85rem; flex-wrap:wrap; gap:8px;">
+            <div>
+              <span style="color:var(--text-dim); text-transform:uppercase; font-size:0.7rem; letter-spacing:0.5px; display:block;">Expected Pace</span>
+              <strong id="smart-pacing-expected" style="color:var(--accent); font-size:1.1rem; font-family:var(--mono);">0 mL</strong>
+            </div>
+            <div>
+              <span style="color:var(--text-dim); text-transform:uppercase; font-size:0.7rem; letter-spacing:0.5px; display:block;">To Reach Target</span>
+              <strong id="smart-pacing-needed" style="color:#fbbf24; font-size:1.1rem; font-family:var(--mono);">0 mL</strong>
+            </div>
+            <div id="smart-pacing-status-pill" style="font-size:0.75rem; font-weight:600; padding:4px 10px; border-radius:12px; background:rgba(34,197,94,0.15); color:#4ade80;">
+              On Track
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 14px;">
+            <div style="background:var(--bg); padding:10px 12px; border-radius:8px; border:1px solid var(--border);">
+              <label style="display:block; font-size:0.7rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">⏱️ Recommended Sip Interval</label>
+              <select id="smart-interval-select" style="width:100%; background:transparent; border:none; color:var(--accent); font-family:var(--mono); font-size:0.95rem; font-weight:700; outline:none; cursor:pointer;">
+                <option value="15">15 min</option>
+                <option value="20">20 min</option>
+                <option value="30">30 min</option>
+                <option value="40" selected>40 min</option>
+                <option value="45">45 min</option>
+                <option value="60">60 min</option>
+              </select>
+            </div>
+
+            <div style="background:var(--bg); padding:10px 12px; border-radius:8px; border:1px solid var(--border);">
+              <label style="display:block; font-size:0.7rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">💡 Gentle Reminder Mode</label>
+              <select id="smart-gentle-mode-select" style="width:100%; background:transparent; border:none; color:var(--accent); font-family:var(--mono); font-size:0.95rem; font-weight:700; outline:none; cursor:pointer;">
+                <option value="default" selected>Default</option>
+                <option value="breathe">Breathe</option>
+                <option value="calm">Calm</option>
+                <option value="rainbow">Rainbow</option>
+                <option value="warmth">Warmth</option>
+                <option value="christmas">Christmas</option>
+              </select>
+            </div>
+
+            <div style="background:var(--bg); padding:10px 12px; border-radius:8px; border:1px solid var(--border);">
+              <label style="display:block; font-size:0.7rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">🔄 Gentle Repeat</label>
+              <select id="smart-repeat-select" style="width:100%; background:transparent; border:none; color:var(--accent); font-family:var(--mono); font-size:0.95rem; font-weight:700; outline:none; cursor:pointer;">
+                <option value="1">1 min</option>
+                <option value="2">2 min</option>
+                <option value="3" selected>3 min</option>
+                <option value="5">5 min</option>
+              </select>
+            </div>
+
+            <div style="background:var(--bg); padding:10px 12px; border-radius:8px; border:1px solid var(--border);">
+              <label style="display:block; font-size:0.7rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">⏳ Escalation Delay</label>
+              <select id="smart-escalation-select" style="width:100%; background:transparent; border:none; color:var(--accent); font-family:var(--mono); font-size:0.95rem; font-weight:700; outline:none; cursor:pointer;">
+                <option value="5">5 min</option>
+                <option value="10">10 min</option>
+                <option value="15" selected>15 min</option>
+                <option value="20">20 min</option>
+                <option value="30">30 min</option>
+              </select>
+            </div>
+
+            <div style="background:var(--bg); padding:10px 12px; border-radius:8px; border:1px solid var(--border);">
+              <label style="display:block; font-size:0.7rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">🌈 Escalated Mode</label>
+              <select id="smart-escalated-mode-select" style="width:100%; background:transparent; border:none; color:var(--accent); font-family:var(--mono); font-size:0.95rem; font-weight:700; outline:none; cursor:pointer;">
+                <option value="default">Default</option>
+                <option value="breathe">Breathe</option>
+                <option value="calm">Calm</option>
+                <option value="rainbow" selected>Rainbow</option>
+                <option value="warmth">Warmth</option>
+                <option value="christmas">Christmas</option>
+              </select>
+            </div>
+
+            <div style="background:var(--bg); padding:10px 12px; border-radius:8px; border:1px solid var(--border);">
+              <label style="display:block; font-size:0.7rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">💤 Sip Snooze</label>
+              <select id="smart-snooze-select" style="width:100%; background:transparent; border:none; color:var(--accent); font-family:var(--mono); font-size:0.95rem; font-weight:700; outline:none; cursor:pointer;">
+                <option value="5">5 min</option>
+                <option value="10" selected>10 min</option>
+                <option value="15">15 min</option>
+                <option value="20">20 min</option>
+              </select>
+            </div>
+
+            <div style="background:var(--bg); padding:10px 12px; border-radius:8px; border:1px solid var(--border);">
+              <label style="display:block; font-size:0.7rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">🚪 Absence Cutoff (Auto-off)</label>
+              <select id="smart-autooff-select" style="width:100%; background:transparent; border:none; color:var(--accent); font-family:var(--mono); font-size:0.95rem; font-weight:700; outline:none; cursor:pointer;">
+                <option value="45">45 min</option>
+                <option value="60" selected>60 min (1h)</option>
+                <option value="90">90 min</option>
+                <option value="120">120 min (2h)</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom: 14px; background:var(--bg); padding:10px 12px; border-radius:8px; border:1px solid var(--border);">
+            <input type="checkbox" id="smart-behind-only-checkbox" style="accent-color:var(--accent); width:16px; height:16px; cursor:pointer;">
+            <label for="smart-behind-only-checkbox" style="cursor:pointer; font-size:0.8rem; color:var(--text); line-height:1.3;">
+              <strong>Only remind when behind schedule:</strong> When checked, reminders are suppressed if your intake meets or exceeds expected daily pace.
+            </label>
+          </div>
+
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+            <button class="action-btn" style="padding: 7px 14px; font-size: 0.8rem;" onclick="saveSmartReminders()">💾 Save Smart Reminders</button>
+            <span id="smart-sched-feedback" style="font-size:0.8rem; color:#4ade80; display:none;"></span>
           </div>
         </div>
 
