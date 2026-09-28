@@ -20,7 +20,7 @@ The tool communicates with the WaterH collector add-on running on Home Assistant
 
 Activate and use this skill when:
 - **Checking bottle status**: Reading current connection state, battery percentage, water temperature, today's total intake, or recent sip history.
-- **Visual alerts & LED testing**: Flashing the bottle LED or setting LED animation modes (`default`, `breathe`, `rainbow`, `off`) and colors (`blue`, `green`, `red`, `yellow`, `purple`, `cyan`, `white`).
+- **Visual alerts & LED testing**: Flashing the bottle LED or setting LED animation modes (`default`, `breathe`, `calm`, `rainbow`, `warmth`, `christmas`) and colors (`blue`, `green`, `red`, `yellow`, `purple`, `cyan`, `white`).
 - **Syncing bottle display**: Setting or correcting the water volume displayed on the bottle's OLED screen (`intake <ml>`).
 - **Goal management**: Updating the daily hydration target in milliliters (`goal <ml>`).
 - **Protocol reverse engineering & raw testing**: Sending arbitrary hex bytes directly to the bottle (`raw <hex>`) to experiment with new commands without changing code or restarting containers.
@@ -73,8 +73,8 @@ python3 send_cmd.py led breathe blue
 # Rainbow mode
 python3 send_cmd.py led rainbow
 
-# Turn off LED
-python3 send_cmd.py led off
+# Calm mode
+python3 send_cmd.py led calm
 ```
 
 ### 3. Updating Bottle Display & Daily Target

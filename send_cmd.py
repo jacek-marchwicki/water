@@ -202,7 +202,7 @@ def interactive_menu(base_url: str):
         elif choice == "2":
             cmd_flash(base_url)
         elif choice == "3":
-            mode = input("Mode [default/breathe/rainbow/off] (default: breathe): ").strip() or "breathe"
+            mode = input("Mode [default/breathe/calm/rainbow/warmth/christmas] (default: breathe): ").strip() or "breathe"
             color = input("Color [blue/green/red/yellow/purple/cyan/white] (default: blue): ").strip() or "blue"
             cmd_led(base_url, mode, color)
         elif choice == "4":
@@ -255,7 +255,7 @@ def main():
 
     # led
     led_p = subparsers.add_parser("led", help="Set LED lighting mode and color")
-    led_p.add_argument("mode", nargs="?", default="breathe", choices=["default", "breathe", "rainbow", "off"], help="LED mode")
+    led_p.add_argument("mode", nargs="?", default="breathe", choices=["default", "breathe", "calm", "rainbow", "warmth", "christmas"], help="LED mode")
     led_p.add_argument("color", nargs="?", default="blue", choices=["blue", "green", "red", "yellow", "purple", "cyan", "white"], help="LED color")
 
     # intake

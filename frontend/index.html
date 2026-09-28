@@ -288,13 +288,18 @@
         <div class="card controls-card" style="margin-bottom: 20px;">
           <h3 style="font-size: 1rem; margin-bottom: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">⚡ Interactive Controls</h3>
           <div class="controls-row" style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
-            <button class="action-btn" onclick="flashLED()">💡 Flash LED</button>
-            <select id="led-select" onchange="setLED()" style="background:#1e1e1e; color:white; border:1px solid #333; padding:10px; border-radius:6px; flex:1; min-width:180px;">
-              <option value="default">LED Mode: Default</option>
-              <option value="breathe">LED Mode: Breathe</option>
-              <option value="rainbow">LED Mode: Rainbow</option>
-              <option value="off">LED Mode: Off</option>
-            </select>
+            <button class="action-btn" onclick="flashLED()" style="border-radius:8px; padding:12px 20px; font-weight:700;">💡 Flash LED</button>
+            <div style="background:var(--bg); padding:10px 12px; border-radius:8px; border:1px solid var(--border); flex:1; min-width:180px;">
+              <label style="display:block; font-size:0.7rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">💡 LED Mode</label>
+              <select id="led-select" onchange="setLED()" style="width:100%; background:transparent; border:none; color:var(--accent); font-family:var(--mono); font-size:0.95rem; font-weight:700; outline:none; cursor:pointer;">
+                <option value="default" selected>Default</option>
+                <option value="breathe">Breathe</option>
+                <option value="calm">Calm</option>
+                <option value="rainbow">Rainbow</option>
+                <option value="warmth">Warmth</option>
+                <option value="christmas">Christmas</option>
+              </select>
+            </div>
           </div>
         </div>
 

@@ -11,6 +11,12 @@
   --green: #66bb6a;
   --red: #ef5350;
   --mono: "JetBrains Mono", "Fira Code", "SF Mono", monospace;
+  color-scheme: dark;
+}
+
+select option {
+  background: var(--surface);
+  color: var(--text);
 }
 
 body {

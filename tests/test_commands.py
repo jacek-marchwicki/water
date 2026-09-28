@@ -150,6 +150,34 @@ class TestProtocolCommands(IsolatedCollectorTestCase):
         cmd = cmd_recalibrate(full=False)
         self.assertEqual(cmd, bytes.fromhex("5054000302A601"))
 
+    def test_send_cmd_led_mode_choices(self):
+        """Verify send_cmd.py parser supports all 6 official LED modes."""
+        import send_cmd
+        expected_modes = ["default", "breathe", "calm", "rainbow", "warmth", "christmas"]
+        # Parse arguments for led subcommand
+        for mode in expected_modes:
+            with patch("sys.argv", ["send_cmd.py", "led", mode, "blue"]):
+                # Should not raise SystemExit
+                parser = None
+                # Test by extracting the parser directly from send_cmd
+                import argparse
+                # We can check that send_cmd.py's choices contain all expected modes
+                # Or run its arg parsing logic
+        # Let's inspect the subparser choices directly:
+        with patch("sys.argv", ["send_cmd.py", "--help"]):
+            # Inspect send_cmd module directly
+            import sys
+            import io
+            from contextlib import redirect_stdout, redirect_stderr
+            # Parse 'led' command with each mode
+            for mode in expected_modes:
+                with patch("sys.argv", ["send_cmd.py", "led", mode]):
+                    # Simulate calling send_cmd with each mode
+                    # Using send_cmd's parser
+                    with patch("send_cmd.cmd_led"):
+                        with redirect_stdout(io.StringIO()):
+                            send_cmd.main()
+
 
 if __name__ == "__main__":
     unittest.main()

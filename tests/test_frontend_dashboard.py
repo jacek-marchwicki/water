@@ -43,6 +43,21 @@ class TestFrontendDashboardDateHandling(unittest.TestCase):
         self.assertIn('id="smart-snooze-select"', html)
         self.assertIn('id="smart-autooff-select"', html)
 
+    def test_led_mode_pickers_consistency_and_options(self):
+        """Ensure all LED mode pickers (interactive controls, gentle reminder, escalated) have all 6 options."""
+        import re
+
+        html = self.frontend_html.read_text(encoding="utf-8")
+        expected_modes = ["default", "breathe", "calm", "rainbow", "warmth", "christmas"]
+
+        for select_id in ["led-select", "smart-gentle-mode-select", "smart-escalated-mode-select"]:
+            match = re.search(rf'<select id="{select_id}"[^>]*>(.*?)</select>', html, re.DOTALL)
+            self.assertIsNotNone(match, f"Select element {select_id} not found in index.html")
+            block = match.group(1)
+            options = re.findall(r'<option value="([^"]+)"', block)
+            self.assertEqual(options, expected_modes, f"Select {select_id} does not have all 6 expected modes in order")
+            self.assertNotIn("LED Mode:", block, f"Select {select_id} contains deprecated 'LED Mode:' prefix")
+
     def test_node_execution_parse_date_and_time_ago(self):
         """Run Node.js assertions directly against frontend/src/main.js."""
         if not self.node_bin:

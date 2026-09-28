@@ -64,7 +64,7 @@ case "$cmd" in
     echo ""
     echo "Available commands:"
     echo "  ./send_cmd.sh flash                  - Flash bottle LED"
-    echo "  ./send_cmd.sh led [mode] [color]     - Set LED (e.g. ./send_cmd.sh led rainbow blue)"
+    echo "  ./send_cmd.sh led [mode] [color]     - Set LED (default, breathe, calm, rainbow, warmth, christmas; e.g. ./send_cmd.sh led rainbow blue)"
     echo "  ./send_cmd.sh intake <ml>            - Update intake display (e.g. ./send_cmd.sh intake 500)"
     echo "  ./send_cmd.sh goal <ml>              - Set daily goal (e.g. ./send_cmd.sh goal 2500)"
     echo "  ./send_cmd.sh raw <hex>              - Send arbitrary hex bytes (e.g. ./send_cmd.sh raw 50 54 00 03 02 1d 01)"
