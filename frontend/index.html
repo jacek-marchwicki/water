@@ -30,6 +30,7 @@
     <nav>
       <button class="nav-btn active" data-page="today">Today</button>
       <button class="nav-btn" data-page="history">History</button>
+      <button class="nav-btn" data-page="settings">Settings</button>
       <button class="nav-btn" data-page="about">About</button>
     </nav>
 
@@ -69,6 +70,63 @@
           </div>
         </div>
 
+        <div class="card manual-card" style="margin-bottom: 20px;">
+          <h3 style="font-size: 1rem; margin-bottom: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">➕ Log Drink Manually</h3>
+          
+          <div style="font-size: 0.75rem; color: #94a3b8; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Quick Log</div>
+          <div class="quick-buttons">
+            <button class="quick-btn" onclick="logSip(120)">☕ Small Cup<span class="subtext">120 mL</span></button>
+            <button class="quick-btn" onclick="logSip(200)">🥛 Large Cup<span class="subtext">200 mL</span></button>
+            <button class="quick-btn" onclick="logSip(310)">🍵 Mug<span class="subtext">310 mL</span></button>
+            <button class="quick-btn" onclick="logSip(700)">🚴 Bidon<span class="subtext">700 mL</span></button>
+          </div>
+
+          <div style="font-size: 0.75rem; color: #94a3b8; margin-bottom: 8px; margin-top: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Custom Amount</div>
+          <div class="slider-box">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <span style="color:#94a3b8; font-size:0.9rem;">Select Amount:</span>
+              <span style="font-size:1.3rem; font-weight:700; color:#38bdf8;"><span id="slider-val">250</span> <span style="font-size:0.85rem; color:#94a3b8;">mL</span></span>
+            </div>
+            <input type="range" id="custom-slider" min="50" max="1000" step="10" value="250" oninput="updateSliderText(this.value)">
+            <div style="display:flex; justify-content:space-between; font-size:0.75rem; color:#64748b; margin-top:6px;">
+              <span>50 mL</span>
+              <span>500 mL</span>
+              <span>1000 mL</span>
+            </div>
+            <button class="action-btn" style="margin-top: 12px; width: 100%;" onclick="logCustomSip()">💧 Log Custom Drink</button>
+          </div>
+        </div>
+
+        <table>
+          <thead><tr><th>Time</th><th>Amount</th><th>Action</th></tr></thead>
+          <tbody id="sip-table"></tbody>
+        </table>
+      </section>
+
+      <!-- History -->
+      <section id="page-history" class="page">
+        <div class="stats">
+          <div class="stat">
+            <div class="stat-label">Avg Daily</div>
+            <div class="stat-value"><span id="hist-avg">0</span><span class="unit">ml</span></div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Best Day</div>
+            <div class="stat-value"><span id="hist-best">0</span><span class="unit">ml</span></div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Streak</div>
+            <div class="stat-value"><span id="hist-streak">0</span><span class="unit">days</span></div>
+          </div>
+        </div>
+        <div class="chart-container">
+          <canvas id="history-chart"></canvas>
+        </div>
+        <div id="heatmap" class="heatmap"></div>
+      </section>
+
+      <!-- Settings -->
+      <section id="page-settings" class="page">
         <div class="card goal-card" style="margin-bottom: 20px;">
           <h3 style="font-size: 1rem; margin-bottom: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">🎯 Daily Hydration Goal</h3>
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
@@ -257,34 +315,6 @@
           </div>
         </div>
 
-
-        <div class="card manual-card" style="margin-bottom: 20px;">
-          <h3 style="font-size: 1rem; margin-bottom: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">➕ Log Drink Manually</h3>
-          
-          <div style="font-size: 0.75rem; color: #94a3b8; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Quick Log</div>
-          <div class="quick-buttons">
-            <button class="quick-btn" onclick="logSip(120)">☕ Small Cup<span class="subtext">120 mL</span></button>
-            <button class="quick-btn" onclick="logSip(200)">🥛 Large Cup<span class="subtext">200 mL</span></button>
-            <button class="quick-btn" onclick="logSip(310)">🍵 Mug<span class="subtext">310 mL</span></button>
-            <button class="quick-btn" onclick="logSip(700)">🚴 Bidon<span class="subtext">700 mL</span></button>
-          </div>
-
-          <div style="font-size: 0.75rem; color: #94a3b8; margin-bottom: 8px; margin-top: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Custom Amount</div>
-          <div class="slider-box">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-              <span style="color:#94a3b8; font-size:0.9rem;">Select Amount:</span>
-              <span style="font-size:1.3rem; font-weight:700; color:#38bdf8;"><span id="slider-val">250</span> <span style="font-size:0.85rem; color:#94a3b8;">mL</span></span>
-            </div>
-            <input type="range" id="custom-slider" min="50" max="1000" step="10" value="250" oninput="updateSliderText(this.value)">
-            <div style="display:flex; justify-content:space-between; font-size:0.75rem; color:#64748b; margin-top:6px;">
-              <span>50 mL</span>
-              <span>500 mL</span>
-              <span>1000 mL</span>
-            </div>
-            <button class="action-btn" style="margin-top: 12px; width: 100%;" onclick="logCustomSip()">💧 Log Custom Drink</button>
-          </div>
-        </div>
-
         <div class="card controls-card" style="margin-bottom: 20px;">
           <h3 style="font-size: 1rem; margin-bottom: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">⚡ Interactive Controls</h3>
           <div class="controls-row" style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
@@ -302,33 +332,6 @@
             </div>
           </div>
         </div>
-
-        <table>
-          <thead><tr><th>Time</th><th>Amount</th><th>Action</th></tr></thead>
-          <tbody id="sip-table"></tbody>
-        </table>
-      </section>
-
-      <!-- History -->
-      <section id="page-history" class="page">
-        <div class="stats">
-          <div class="stat">
-            <div class="stat-label">Avg Daily</div>
-            <div class="stat-value"><span id="hist-avg">0</span><span class="unit">ml</span></div>
-          </div>
-          <div class="stat">
-            <div class="stat-label">Best Day</div>
-            <div class="stat-value"><span id="hist-best">0</span><span class="unit">ml</span></div>
-          </div>
-          <div class="stat">
-            <div class="stat-label">Streak</div>
-            <div class="stat-value"><span id="hist-streak">0</span><span class="unit">days</span></div>
-          </div>
-        </div>
-        <div class="chart-container">
-          <canvas id="history-chart"></canvas>
-        </div>
-        <div id="heatmap" class="heatmap"></div>
       </section>
 
       <!-- About -->

@@ -58,6 +58,83 @@ class TestFrontendDashboardDateHandling(unittest.TestCase):
             self.assertEqual(options, expected_modes, f"Select {select_id} does not have all 6 expected modes in order")
             self.assertNotIn("LED Mode:", block, f"Select {select_id} contains deprecated 'LED Mode:' prefix")
 
+    def test_navigation_tabs_order_and_pages(self):
+        """Ensure navigation contains Today, History, Settings, and About in order."""
+        import re
+
+        html = self.frontend_html.read_text(encoding="utf-8")
+        nav_match = re.search(r'<nav>(.*?)</nav>', html, re.DOTALL)
+        self.assertIsNotNone(nav_match, "Navigation element <nav> not found in index.html")
+        nav_block = nav_match.group(1)
+
+        buttons = re.findall(r'<button[^>]*data-page="([^"]+)"[^>]*>(.*?)</button>', nav_block)
+        expected_tabs = [
+            ("today", "Today"),
+            ("history", "History"),
+            ("settings", "Settings"),
+            ("about", "About"),
+        ]
+        self.assertEqual(len(buttons), 4, "Expected exactly 4 navigation tabs")
+        for i, (page, text) in enumerate(expected_tabs):
+            self.assertEqual(buttons[i][0], page, f"Tab {i+1} data-page mismatch")
+            self.assertEqual(buttons[i][1].strip(), text, f"Tab {i+1} text mismatch")
+
+        # Third tab must be Settings
+        self.assertEqual(buttons[2][0], "settings")
+        self.assertEqual(buttons[2][1].strip(), "Settings")
+
+        # Ensure all corresponding section pages exist
+        for page, _ in expected_tabs:
+            self.assertRegex(html, rf'<section[^>]*id="page-{page}"[^>]*class="page[^"]*"', f"Section #page-{page} not found")
+
+    def test_cards_moved_to_settings_tab(self):
+        """Ensure goal, schedule, smart reminders, and controls cards are in page-settings and not in page-today."""
+        import re
+
+        html = self.frontend_html.read_text(encoding="utf-8")
+
+        # Extract page-today section
+        today_match = re.search(r'<section\s+id="page-today"[^>]*>(.*?)</section>', html, re.DOTALL)
+        self.assertIsNotNone(today_match, "Section #page-today not found")
+        today_content = today_match.group(1)
+
+        # Extract page-settings section
+        settings_match = re.search(r'<section\s+id="page-settings"[^>]*>(.*?)</section>', html, re.DOTALL)
+        self.assertIsNotNone(settings_match, "Section #page-settings not found")
+        settings_content = settings_match.group(1)
+
+        # Cards expected in page-settings
+        self.assertIn("goal-card", settings_content, "goal-card should be in page-settings")
+        self.assertIn("Daily Hydration Goal", settings_content)
+        self.assertIn('id="display-goal"', settings_content)
+
+        self.assertIn("schedule-card", settings_content, "schedule-card should be in page-settings")
+        self.assertIn("Active Day & Reminders", settings_content)
+        self.assertIn('id="sched-reminder-toggle"', settings_content)
+        self.assertIn('id="sched-wake-input"', settings_content)
+
+        self.assertIn("smart-reminders-card", settings_content, "smart-reminders-card should be in page-settings")
+        self.assertIn("Smart Hydration Glow", settings_content)
+        self.assertIn('id="smart-reminder-toggle"', settings_content)
+
+        self.assertIn("controls-card", settings_content, "controls-card should be in page-settings")
+        self.assertIn("Interactive Controls", settings_content)
+        self.assertIn('id="led-select"', settings_content)
+        self.assertIn("flashLED()", settings_content)
+
+        # Cards that must NOT be in page-today
+        self.assertNotIn("goal-card", today_content, "goal-card must not be in page-today")
+        self.assertNotIn("schedule-card", today_content, "schedule-card must not be in page-today")
+        self.assertNotIn("smart-reminders-card", today_content, "smart-reminders-card must not be in page-today")
+        self.assertNotIn("controls-card", today_content, "controls-card must not be in page-today")
+
+        # Today screen must retain manual logging card, sip table, and stats
+        self.assertIn("manual-card", today_content, "manual-card must remain in page-today")
+        self.assertIn("Log Drink Manually", today_content)
+        self.assertIn('id="sip-table"', today_content, "sip-table must remain in page-today")
+        self.assertIn('id="stat-battery"', today_content)
+        self.assertIn('id="stat-pacing"', today_content)
+
     def test_node_execution_parse_date_and_time_ago(self):
         """Run Node.js assertions directly against frontend/src/main.js."""
         if not self.node_bin:

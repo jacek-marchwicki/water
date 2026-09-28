@@ -245,6 +245,10 @@ if (typeof document !== "undefined") {
       document.getElementById(`page-${btn.dataset.page}`).classList.add("active");
 
       if (btn.dataset.page === "history") loadHistory();
+      if (btn.dataset.page === "settings") {
+        if (!scheduleLoaded) loadSchedule();
+        loadSmartReminders();
+      }
     });
   });
 
