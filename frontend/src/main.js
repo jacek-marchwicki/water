@@ -579,7 +579,13 @@ function parseDate(iso) {
     if (!isNaN(d.getTime())) return d;
   }
 
-  // SQLite UTC format "YYYY-MM-DD HH:MM:SS" or naive ISO format
+  // Naive ISO format with "T" (local time from bottle RTC / collector)
+  if (s.includes("T")) {
+    const localDate = new Date(s);
+    if (!isNaN(localDate.getTime())) return localDate;
+  }
+
+  // SQLite UTC format "YYYY-MM-DD HH:MM:SS" (space separated without timezone)
   const normalized = s.replace(" ", "T");
   const utcDate = new Date(normalized + "Z");
   if (!isNaN(utcDate.getTime())) return utcDate;

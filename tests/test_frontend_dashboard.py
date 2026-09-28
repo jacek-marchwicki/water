@@ -99,6 +99,32 @@ class TestFrontendDashboardDateHandling(unittest.TestCase):
         if (parseDate(now).getTime() !== now.getTime()) throw new Error('Date instance parsing failed');
         if (parseDate(1700000000000).getTime() !== 1700000000000) throw new Error('Number timestamp parsing failed');
 
+        // Test 10b: Naive ISO timestamps from bottle logs (e.g. 08:00) must be parsed as local time without +2h shift
+        const bottleSip = parseDate('2026-09-28T08:00:00');
+        if (!bottleSip) throw new Error('Failed to parse bottle sip timestamp');
+        if (bottleSip.getHours() !== 8) {
+            throw new Error(`Bottle sip shifted! Expected local hour 8, got ${bottleSip.getHours()}`);
+        }
+        if (bottleSip.getMinutes() !== 0 || bottleSip.getSeconds() !== 0) {
+            throw new Error('Bottle sip minutes/seconds mismatch');
+        }
+        const timeStr = bottleSip.toLocaleTimeString();
+        if (!timeStr.includes('8:00') && !timeStr.includes('08:00')) {
+            throw new Error(`toLocaleTimeString shifted! Expected 8:00, got: ${timeStr}`);
+        }
+
+        // Test 10c: Naive ISO with minutes and seconds
+        const bottleSip2 = parseDate('2026-09-28T14:35:22');
+        if (bottleSip2.getHours() !== 14 || bottleSip2.getMinutes() !== 35 || bottleSip2.getSeconds() !== 22) {
+            throw new Error(`Bottle sip 2 shifted! Expected 14:35:22, got ${bottleSip2.getHours()}:${bottleSip2.getMinutes()}:${bottleSip2.getSeconds()}`);
+        }
+
+        // Test 10d: Space-separated SQLite UTC timestamp is parsed as UTC
+        const sqliteDate = parseDate('2026-09-26 21:20:40');
+        if (sqliteDate.toISOString() !== '2026-09-26T21:20:40.000Z') {
+            throw new Error(`SQLite UTC expected 2026-09-26T21:20:40.000Z, got ${sqliteDate.toISOString()}`);
+        }
+
         // Test 11: renderStatus and getLatestStatus exports
         const { renderStatus, getLatestStatus } = globalThis;
         if (typeof renderStatus !== 'function') throw new Error('renderStatus not a function');

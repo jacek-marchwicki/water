@@ -110,6 +110,23 @@ class TestPacketParsing(IsolatedCollectorTestCase):
         self.assertEqual(records[0]["timestamp"], "2026-13-32T15:45:12")
         self.assertEqual(records[0]["intake_ml"], 300)
 
+    def test_sip_at_0800_parsed_as_local_time_without_offset_shift(self):
+        """Verify sip recorded at 08:00:00 produces exact local ISO timestamp without +2h shift."""
+        # Header (6 bytes): 5054000d0d06
+        # Date: 2026-09-28 08:00:00 (1a 09 1c 08 00 00)
+        # Intake: 250ml (00fa)
+        # TDS: 60 (003c)
+        # Status: 01
+        # Battery: 85% (55)
+        # Pad: 00
+        pkt = bytes.fromhex("5054000d0d06" + "1a091c08000000fa003c015500")
+        records, pt_bytes = parse_pt_packets([pkt])
+
+        self.assertEqual(len(records), 1)
+        sip = records[0]
+        self.assertEqual(sip["timestamp"], "2026-09-28T08:00:00")
+        self.assertEqual(sip["intake_ml"], 250)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -146,8 +146,11 @@ class TestServerGoalAndEndpoints(IsolatedServerTestCase):
     def test_history_endpoint_includes_goal_ml(self):
         """Verify GET /api/history returns goal_ml matching the active database goal."""
         self.run_async(srv.db.execute("INSERT INTO settings (key, value) VALUES ('goal_ml', '2200')"))
-        self.run_async(srv.db.execute("INSERT INTO sips (timestamp, intake_ml, temp_c) VALUES ('2026-09-20T10:00:00', 1200, 20.0)"))
-        self.run_async(srv.db.execute("INSERT INTO sips (timestamp, intake_ml, temp_c) VALUES ('2026-09-21T10:00:00', 1600, 21.0)"))
+        today = srv.datetime.now(srv.WATERH_TZ).date()
+        d1 = (today - srv.timedelta(days=2)).isoformat()
+        d2 = (today - srv.timedelta(days=1)).isoformat()
+        self.run_async(srv.db.execute("INSERT INTO sips (timestamp, intake_ml, temp_c) VALUES (?, 1200, 20.0)", (f"{d1}T10:00:00",)))
+        self.run_async(srv.db.execute("INSERT INTO sips (timestamp, intake_ml, temp_c) VALUES (?, 1600, 21.0)", (f"{d2}T10:00:00",)))
         self.run_async(srv.db.commit())
 
         resp = self.client.get("/api/history?days=7")

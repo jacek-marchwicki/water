@@ -157,8 +157,8 @@ def get_today_str() -> str:
     return get_local_now().strftime("%Y-%m-%d")
 
 
-def get_today_total(db) -> int:
-    today_str = get_today_str()
+def get_today_total(db, now_dt: datetime | None = None) -> int:
+    today_str = now_dt.strftime("%Y-%m-%d") if now_dt else get_today_str()
     row = db.execute(
         "SELECT COALESCE(SUM(intake_ml), 0) FROM sips WHERE DATE(timestamp) = ?",
         (today_str,)
@@ -166,8 +166,8 @@ def get_today_total(db) -> int:
     return row[0] if row else 0
 
 
-def get_today_sips(db, limit: int = 50) -> list[tuple]:
-    today_str = get_today_str()
+def get_today_sips(db, limit: int = 50, now_dt: datetime | None = None) -> list[tuple]:
+    today_str = now_dt.strftime("%Y-%m-%d") if now_dt else get_today_str()
     return db.execute(
         f"SELECT id, timestamp, intake_ml, temp_c, tds, raw_hex FROM sips WHERE DATE(timestamp) = ? ORDER BY timestamp DESC LIMIT {limit}",
         (today_str,)
@@ -604,7 +604,7 @@ def evaluate_smart_reminders(
         close_db = True
 
     try:
-        today_total = get_today_total(db)
+        today_total = get_today_total(db, now_dt=now_dt)
         expected_ml = calculate_expected_intake(now_dt, GOAL_ML, sched)
         behind_schedule = today_total < expected_ml
         to_reach_expected = max(0, expected_ml - today_total)
@@ -1601,7 +1601,7 @@ async def handle_cmd_request(reader: asyncio.StreamReader, writer: asyncio.Strea
             ml = int(data.get("ml", 0))
             if ml > 0:
                 db = init_db()
-                now_str = get_local_now().isoformat()
+                now_str = get_local_now().strftime("%Y-%m-%dT%H:%M:%S")
                 db.execute(
                     "INSERT OR IGNORE INTO sips (timestamp, intake_ml, synced) VALUES (?, ?, 1)",
                     (now_str, ml)

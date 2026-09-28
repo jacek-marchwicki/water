@@ -144,6 +144,30 @@ class TestDatabase(IsolatedCollectorTestCase):
         self.assertEqual(len(col.get_unsynced(db)), 1)
         db.close()
 
+    def test_sip_storage_and_query_at_0800(self):
+        """Verify sips logged at 08:00 are stored and queried with exact local timestamp."""
+        from datetime import datetime
+        db = col.init_db()
+        test_sips = [
+            {"timestamp": "2026-09-28T08:00:00", "intake_ml": 250, "temp_c": None, "tds": 50, "raw": "hex"}
+        ]
+        col.store_sips(db, test_sips)
+
+        now = datetime(2026, 9, 28, 8, 15)
+        total = col.get_today_total(db, now_dt=now)
+        self.assertEqual(total, 250)
+
+        sips = col.get_today_sips(db, now_dt=now)
+        self.assertEqual(len(sips), 1)
+        self.assertEqual(sips[0][1], "2026-09-28T08:00:00")
+        self.assertEqual(sips[0][2], 250)
+
+        last_time = col.get_last_sip_time(db, now_dt=now)
+        self.assertIsNotNone(last_time)
+        self.assertEqual(last_time.hour, 8)
+        self.assertEqual(last_time.minute, 0)
+        db.close()
+
 
 if __name__ == "__main__":
     unittest.main()
